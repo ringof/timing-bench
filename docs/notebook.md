@@ -16,6 +16,31 @@ negative results are results.
 
 ---
 
+### 2026-07-07 (evening) — extended dry run: 6 h capture; collector robust; qErr τ⁻¹ over 13 octaves
+- **Setup:** F9T timing mode (GPS grid, RAM). Hardened `collect/log_ubx_timing.sh`
+  — hourly rotating segments, fresh `ubxtool -w 3600` handle each, TIM-TP+NAV-PVT.
+- **Capture:** `data/run_20260707-062948/` — 7 segments (6×1 h + partial),
+  ~6.07 h, 21,842 TIM-TP. Reduced: `data/sample_overnight_timtp.tsv`, `.adev.tsv`.
+- **Observed:**
+  - **Robustness (the goal):** manifest = exactly `lines=50400 tim_tp=3600` for
+    all 6 full hours (zero dropped timepulses), `ubxtool.err` empty, clean
+    rotation + Ctrl-C stop, no back-off. The fresh-handle-per-hour design held
+    all night; a failure would have cost ≤1 segment and shown as a low count.
+  - **qErr:** stable ±~4 ns uniform sawtooth (min −4.04, max 3.81, mean −0.11,
+    RMS 2.25 ns) across the full 6 h — no drift, no gaps.
+  - **ADEV:** pure **τ⁻¹** over 13 octaves (3.97e-9 @1 s → 4.71e-13 @8192 s),
+    slope ≈ −1.00 → white phase / quantization noise; no floor or structure.
+- **Fixed/learned:** ubxtool default `--wait` ≈ 2 s (captures need `-w`);
+  `allan.py` drops NaN (not forward-fill) for interleaved TIM-TP+NAV-PVT;
+  `pps_offset.gp` x-axis = elapsed seconds; `apply-timing-config.sh` valset now
+  read-back-verifies (kills the false "no ACK" WARNs).
+- **Boundary:** this is the receiver's self-reported *quantization*, not its true
+  stability or the value of sawtooth correction — those are Stage 3 (PPS vs an
+  independent clock, needs the i226).
+- **Next:** antenna siting → tight/long survey-in → real Stage-1/2 capture.
+
+---
+
 ### 2026-07-07 — dry-run pipeline works end-to-end; τ⁻¹ sawtooth ADEV
 - **Setup:** F9T in TIME mode (dry-run survey, GPS grid, RAM). Raw TIM-TP capture.
 - **Capture:** `data/sample_dryrun_timtp.log` (~5 min, 300 TIM-TP @ 1 Hz).

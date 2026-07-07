@@ -35,17 +35,22 @@ command -v ubxtool >/dev/null 2>&1 || { echo "ubxtool not found (install gpsd to
 
 ubx() { ubxtool -P "$PROTVER" -f "$DEV" "$@"; }
 
-valset() {  # valset KEY,VAL   — applies to $LAYER; aborts on NAK
-  local kv="$1" out
-  out="$(ubx -z "${kv},${LAYER}" 2>&1 || true)"
-  if printf '%s\n' "$out" | grep -q 'ACK-NAK'; then
-    echo "  NAK: ${kv}  (layer ${LAYER})" >&2
-    return 1
-  elif printf '%s\n' "$out" | grep -q 'ACK-ACK'; then
-    echo "  ok:  ${kv}  (layer ${LAYER})"
-  else
-    echo "  WARN: no ACK seen for ${kv}" >&2
-  fi
+FAILS=0
+valset() {  # valset KEY,VAL — set in $LAYER, then confirm by reading it back
+  local kv="$1" key val got try
+  key="${kv%%,*}"; val="${kv#*,}"
+  # Verify by read-back rather than trying to catch ubxtool's async ACK — under a
+  # heavy message stream the ACK can land outside ubxtool's read window and yield
+  # a false "no ACK" warning even though the set applied. One retry covers a
+  # transient miss. Read-back is from the RAM layer (0).
+  for try in 1 2; do
+    ubx -z "${kv},${LAYER}" >/dev/null 2>&1 || true
+    got="$(ubx -g "${key},0" 2>&1 | awk -v k="${key}/" '$0 ~ k {print $NF; exit}')"
+    [ "$got" = "$val" ] && { echo "  ok:  ${key} = ${val}  (layer ${LAYER})"; return 0; }
+  done
+  echo "  FAIL: ${key} set=${val} readback=${got:-<none>}" >&2
+  FAILS=$((FAILS + 1))
+  return 0
 }
 
 echo "== F9T timing config -> ${DEV}  (protver ${PROTVER}, layer ${LAYER}, RAM-only) =="
@@ -72,15 +77,21 @@ valset CFG-TMODE-SVIN_MIN_DUR,"${SVIN_MIN_DUR}"
 valset CFG-TMODE-SVIN_ACC_LIMIT,"${SVIN_ACC_LIMIT}"
 valset CFG-TMODE-MODE,1                        # start fresh survey with these params
 
-echo "[7] waiting for survey-in valid (UBX-TIM-SVIN)..."
+echo "[7] waiting for survey-in to complete (TIM-SVIN valid, or fixType 5)..."
 max_iter=$(( SVIN_MIN_DUR / 5 + 60 ))
 for _ in $(seq 1 "$max_iter"); do
-  line="$(timeout 3 ubx 2>&1 | grep -m1 -E 'valid [0-9] active' || true)"
+  snap="$(timeout 3 ubx 2>&1)"
+  line="$(printf '%s\n' "$snap" | grep -m1 -E 'valid [0-9] active' || true)"
   [ -n "$line" ] && echo "  ${line}"
-  case "$line" in
-    *"valid 1"*) echo "survey-in complete."; break ;;
-  esac
+  # Done when TIM-SVIN reports valid, OR NAV-PVT shows a time-only fix
+  # (fixType 5) — some firmware stops emitting TIM-SVIN once survey completes.
+  if printf '%s\n' "$snap" | grep -qE 'valid 1 active 0' \
+     || printf '%s\n' "$snap" | grep -q 'fixType 5'; then
+    echo "survey-in complete (timing mode)."; break
+  fi
   sleep 5
 done
 
+[ "$FAILS" -eq 0 ] && echo "all settings verified." \
+  || echo "WARNING: ${FAILS} setting(s) failed read-back — see FAIL lines above" >&2
 echo "done.  Verify config: ubxtool -P ${PROTVER} -f ${DEV} -g CFG-TMODE"
