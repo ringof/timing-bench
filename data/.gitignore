@@ -1,0 +1,6 @@
+# ignore all captures and reduced files except a committed sample
+*
+!.gitignore
+!sample_*.log
+!sample_*.tsv
+!sample_*.adev.tsv
