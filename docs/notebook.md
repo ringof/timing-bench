@@ -16,6 +16,26 @@ negative results are results.
 
 ---
 
+### 2026-07-07 — dry-run pipeline works end-to-end; τ⁻¹ sawtooth ADEV
+- **Setup:** F9T in TIME mode (dry-run survey, GPS grid, RAM). Raw TIM-TP capture.
+- **Capture:** `data/sample_dryrun_timtp.log` (~5 min, 300 TIM-TP @ 1 Hz).
+  Reduced: `data/sample_dryrun_timtp.tsv`, `data/sample_dryrun_timtp.adev.tsv`.
+- **Observed:** qErr sawtooth bounded **±~3.9 ns**, RMS **2.18 ns**, mean ≈ 0
+  (uniform, as expected: 3.9/√3 ≈ 2.25 ≈ RMS). ADEV a clean **τ⁻¹** line
+  (σ_y(1 s) ≈ 3.6e-9 → 3.0e-11 @ 128 s) = white phase / quantization noise, i.e.
+  the *uncorrected* sawtooth. Whole chain collect → `parse_pps.py` → `allan.py`
+  → gnuplot ran on real data; `parse_pps.py` handled the TIM-TP decode as-is
+  (qErr ps→ns correct).
+- **Learned:** ubxtool default `--wait` ≈ 2 s → captures need `-w <dur>`. The
+  `collect/log_ubx_timing.sh` stub also passes the device positionally instead of
+  `-f`. Both to fix. Sawtooth *correction* (corrected-vs-uncorrected ADEV) needs
+  no new data — a later reduce step.
+- **Next:** fix + harden the collector for long unattended runs (segmented,
+  rotating output, auto-restart — a single long-lived handle is fragile); tidy
+  the qErr-vs-time x-axis; then an overnight extended dry run.
+
+---
+
 ### 2026-07-07 — timing mode via survey-in (dry-run params); TIM-SVIN, not NAV-SVIN
 - **Setup:** ZED-F9T-20B, raw ubxtool, RAM-only changes. Goal for this pass: a
   **dry run** — get end-to-end through collect → reduce → plot and a good-enough
