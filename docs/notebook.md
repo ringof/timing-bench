@@ -16,6 +16,25 @@ negative results are results.
 
 ---
 
+### 2026-07-07 (afternoon) — config as plain commands; config script removed
+- **Setup:** F9T on USB; re-applied the timing config.
+- **What happened:** `config/f9t/apply-timing-config.sh` overreached — its
+  read-back+retry `valset()` (2–4 ubxtool opens per setting) **hung on the very
+  first setting** on real hardware. The container "validation" (a fake ubxtool I
+  wrote) couldn't have caught it; only the bench did.
+- **Fix (observed):** distilled the config to plain one-line `ubxtool -z`
+  commands (now in `docs/f9t-setup.md`), run one at a time on the bench:
+  grid=GPS (TIM-TP `refInfo 0x0`, week 2426), TIM-TP + TIM-SVIN enabled;
+  `CFG-TMODE` read-back MODE=1 / SVIN_MIN_DUR=120 / SVIN_ACC_LIMIT=1000000;
+  survey-in completed (`valid 1 active 0`, dur 120, obs 121; meanV → 3D σ ≈ 22 m,
+  the expected coarse dry-run result).
+- **Decision:** config is plain, one-at-a-time commands in `docs/f9t-setup.md`;
+  `apply-timing-config.sh` **removed**. No config scripts — they hid behavior and
+  broke; plain commands are observable and were confirmed on hardware.
+- **Next:** antenna siting → tighter/longer survey → real Stage-1/2 capture.
+
+---
+
 ### 2026-07-07 (evening) — extended dry run: 6 h capture; collector robust; qErr τ⁻¹ over 13 octaves
 - **Setup:** F9T timing mode (GPS grid, RAM). Hardened `collect/log_ubx_timing.sh`
   — hourly rotating segments, fresh `ubxtool -w 3600` handle each, TIM-TP+NAV-PVT.

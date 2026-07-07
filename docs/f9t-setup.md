@@ -86,15 +86,37 @@ On the USB port, at 1 Hz:
 - Optional: UBX-NAV-TIMEUTC.
 
 ## Reproduce the timing config
-All device changes are RAM-only and revert on power-cycle. To re-apply the bench
-timing configuration (own the port → GPS grid → TIM-TP/TIM-SVIN on → survey-in),
-run the versioned script that captures the exact command sequence:
+Plain commands — run them **one at a time and read each result**. Each `-z`
+prints its own `UBX-ACK-ACK`. All changes are RAM-only (`,1` = RAM layer) and
+revert on power-cycle / replug. Confirmed working end to end on the bench
+2026-07-07. Values are the loose/short **dry-run** survey params; tighten after
+antenna siting (e.g. `SVIN_MIN_DUR=3600`, `SVIN_ACC_LIMIT=20000` for ~2 m).
+
 ```bash
-./config/f9t/apply-timing-config.sh
-# real survey after antenna siting (tighter/longer):
-SVIN_MIN_DUR=3600 SVIN_ACC_LIMIT=20000 ./config/f9t/apply-timing-config.sh
+# own the port (gpsd auto-manages the F9T)
+sudo systemctl stop gpsd.socket gpsd.service
+
+# PPS timepulse grid -> GPS
+ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-TP-TIMEGRID_TP1,1,1
+
+# enable UBX-TIM-TP (sawtooth qErr) + UBX-TIM-SVIN (survey status) on USB
+ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-MSGOUT-UBX_TIM_TP_USB,1,1
+ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-MSGOUT-UBX_TIM_SVIN_USB,1,1
+
+# survey-in: stop, set params (SVIN_ACC_LIMIT is 0.1 mm units; 1000000 = 100 m), start
+ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-TMODE-MODE,0,1
+ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-TMODE-SVIN_MIN_DUR,120,1
+ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-TMODE-SVIN_ACC_LIMIT,1000000,1
+ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-TMODE-MODE,1,1
 ```
-It grows as more of the pipeline (capture → reduce → plot) is proven.
+
+Verify and watch:
+```bash
+# read back what actually took (RAM layer)
+ubxtool -P 29.25 -f /dev/ttyACM0 -w 4 -g CFG-TMODE
+# watch survey-in until the line reads "valid 1 active 0"
+timeout 6 ubxtool -P 29.25 -f /dev/ttyACM0 -w 4 2>&1 | grep -A2 'UBX-TIM-SVIN'
+```
 
 ## Saved config
 As-found baseline snapshot: `config/f9t/20260707-041251_asfound.txt` (MON-VER +
