@@ -1,7 +1,7 @@
 # timing-bench — working agreement (CLAUDE.md)
 
 These instructions OVERRIDE default behavior and must be followed exactly.
-This is a **hardware bench bringup**: a physical NEO-F9T and a host machine
+This is a **hardware bench bringup**: a physical ZED-F9T-20B and a host machine
 are driven by the user, one step at a time. Claude runs in a remote container
 and **cannot see or touch the hardware** — it proposes; the user executes and
 reports back the actual output. Nothing advances on prediction; it advances on
