@@ -16,6 +16,39 @@ negative results are results.
 
 ---
 
+### 2026-07-07 — config baseline; TIM-TP enabled (RAM); PPS grid = Galileo (grid choice OPEN)
+- **Setup:** Same bench, still nav mode, raw `ubxtool`; gpsd left stopped.
+- **Capture:** `config/f9t/20260707-041251_asfound.txt` (as-found config snapshot; read-only).
+- **Observed:**
+  - **Config baseline** (RAM=Default unless noted): `CFG-TMODE-MODE=0` (nav);
+    `CFG-TP` = 1 PPS, 100 ms locked width, aligned-to-TOW, rising, GNSS-synced,
+    `USE_LOCKED=1`, `TIMEGRID_TP1=4`, `ANT_CABLEDELAY=50 ns`, TP2 off; `CFG-RATE`
+    1 Hz, `TIMEREF=1` (GPS); `CFG-SIGNAL` GPS/GAL/BDS/QZSS/SBAS, L1/E1/B1 only
+    (GLONASS unsupported by TIM 2.25); USB `CFG-MSGOUT` NAV set on (non-default →
+    persisted), `TIM_TP_USB=0`.
+  - **Step 1 — TIMEGRID resolved:** `TIMEGRID_TP1 = 4 = GAL (Galileo)`, the
+    firmware factory default (F9-TIM-2.25 Interface Description, Tables 70 & 115).
+    Note the *Integration Manual* PDF covers -00B/-10B, not our -20B; the
+    *Interface Description* matches TIM 2.25 and is the authority.
+  - **Step 2 — TIM-TP enabled (RAM only):** `ubxtool -z CFG-MSGOUT-UBX_TIM_TP_USB,1,1`
+    (LAYERS bitmask: RAM=1; ubxtool default is RAM+Flash=5, so `,1` is required
+    for RAM-only). VALSET ACK'd; `UBX-TIM-TP` streams at 1 Hz. `qErr` unit = **ps**
+    (Int. Desc. p168); first-light ±~3.4 ns (2521, −2430, −153, 1514, 3442 ps).
+    flags: GNSS timebase / UTC available / RAIM active / qErr valid / TP locked.
+  - **Grid empirically confirmed Galileo:** TIM-TP `refInfo=0x3` (timeRefGnss=3)
+    and `week=1402` (Galileo System Time week; GST epoch = GPS week 1024, so
+    2426−1024=1402), vs `NAV-TIMEGPS` GPS week 2426.
+  - **`parse_pps.py` qErr TODO resolved:** qErr is ps → the assumed ps→ns `/1000`
+    is correct.
+- **Decision + applied:** PPS time grid → **GPS** (`CFG-TP-TIMEGRID_TP1 = 1`,
+  RAM-only). Applied and confirmed: TIM-TP now reads `refInfo=0x0` (timeRefGnss=0,
+  GPS) and `week=2426` (GPS week); qErr unchanged in character (±~3 ns). TP2 left
+  on Galileo (disabled anyway).
+- **Next:** Step 3 survey-in (`SVIN_MIN_DUR=3600 s`, `SVIN_ACC_LIMIT` in 0.1 mm
+  units — e.g. 2 m = 20000), RAM-only.
+
+---
+
 ### 2026-07-07 — first live contact; gpsd → raw ubxtool basis established
 - **Setup:** SparkFun GNSS Timing Breakout (ZED-F9T-20B) on USB, `/dev/ttyACM0`
   (by-id `usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00`). Confirmed

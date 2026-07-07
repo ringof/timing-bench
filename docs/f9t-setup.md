@@ -18,8 +18,8 @@ read. Do not treat a TODO as done until a device read confirms it.
 - Default USB output is the UBX nav set (NAV-PVT / -POSECEF / -VELECEF / -SAT /
   -SIG / -DOP / -TIMEGPS / -EOE). **UBX-TIM-TP is NOT in the default stream** —
   must be enabled for sawtooth / Stage-2 work.
-- Operating mode: **navigation** (not timing). Inferred from NAV-PVT motion
-  (nonzero velocity, dithering position). Authoritative CFG-TMODE read: **TODO**.
+- Operating mode: **navigation** — confirmed `CFG-TMODE-MODE = 0` (RAM and
+  default); survey-in disabled, all TMODE position/SVIN fields zero.
 
 ## Device
 - Board: SparkFun GNSS Timing Breakout, **ZED-F9T-20B** module. (Not u-blox's
@@ -49,38 +49,50 @@ units if you need it bulletproof for a long unattended run).
 ## Timing mode
 The F9T is a *timing* receiver — put it in stationary mode with a survey-in (or
 a fixed surveyed position) for best timepulse stability. In moving/nav mode the
-timepulse is far noisier. **Currently in nav mode** (see Confirmed section;
-CFG-TMODE read still pending).
+timepulse is far noisier. **Currently in nav mode** — confirmed `CFG-TMODE-MODE = 0`.
 
-- [ ] Read CFG-TMODE to record the current mode authoritatively.
-- [ ] Set to stationary / TIME mode (CFG-TMODE-MODE).
-- [ ] Survey-in: TODO min duration and TODO position accuracy threshold, OR
-      program a known fixed ECEF/LLH position once survey converges.
+- [x] Read CFG-TMODE — `MODE = 0` (nav); all position/SVIN fields zero.
+- [ ] Set survey-in: `CFG-TMODE-MODE = 1` (SURVEY_IN). Planned first pass:
+      `SVIN_MIN_DUR = 3600 s`, `SVIN_ACC_LIMIT` (U4, units **0.1 mm**) — e.g.
+      2 m = `20000`. RAM-only during bringup.
+- [ ] Monitor `UBX-NAV-SVIN` until `valid = 1`; record surveyed position + variance.
 - [ ] Confirm survey-in valid before trusting timing captures.
 
-## Timepulse (TP) config
-- [ ] Read CFG-TP to record current TP settings.
-- [ ] TP frequency: 1 Hz (1 PPS) — CFG-TP.
-- [ ] Pulse length / duty: TODO.
-- [ ] Enable UBX-TIM-TP on USB so quantization error is logged (confirmed NOT in
-      the default stream as of 2026-07-07).
+## Timepulse (TP) config — confirmed from CFG-TP (2026-07-07)
+- TP1 enabled; 1 PPS (`PERIOD_TP1 = PERIOD_LOCK_TP1 = 1000000 µs`).
+- Pulse width when GNSS-locked: 100 ms (`LEN_LOCK_TP1 = 100000 µs`); `LEN_TP1 = 0`
+  (no pulse until lock). `ALIGN_TO_TOW_TP1 = 1`, `POL_TP1 = 1` (rising),
+  `SYNC_GNSS_TP1 = 1`, `USE_LOCKED_TP1 = 1`. `ANT_CABLEDELAY = 50 ns`. TP2 off.
+- `TIMEGRID_TP1 = 4 = GAL (Galileo)` as-found — firmware factory default
+  (F9-TIM-2.25 Interface Description, Tables 70 & 115); PPS references Galileo
+  System Time (confirmed by TIM-TP `refInfo=0x3`, `week=1402`). **DECISION
+  2026-07-07: set to GPS (`TIMEGRID_TP1 = 1`), RAM-only** — APPLIED & confirmed 2026-07-07
+  (TIM-TP now `refInfo=0x0`, `week=2426`).
+- UBX-TIM-TP enabled on USB in **RAM only** (see Messages). `qErr` is reported in
+  **picoseconds** (Int. Desc. p168); first-light values ±~3.4 ns.
 
 ## Messages to enable (for collectors)
-On the USB port, enable at 1 Hz:
-- UBX-TIM-TP    (timepulse + quantization/sawtooth error)  ← key for Stage 2, not on by default
-- UBX-NAV-PVT / -STATUS (fix type)   [NAV-PVT already on by default]
-- UBX-NAV-SAT or UBX-NAV-SIG (sats used)  [already on by default]
-- Optional: UBX-NAV-TIMEUTC / -TIMEGPS   [TIMEGPS already on by default]
+On the USB port, at 1 Hz:
+- UBX-TIM-TP (timepulse + quantization/sawtooth error) ← key for Stage 2.
+  **Enabled in RAM 2026-07-07** via `CFG-MSGOUT-UBX_TIM_TP_USB=1` (RAM only, not
+  yet persisted). `qErr` in ps.
+- UBX-NAV-PVT / -SAT / -SIG / -POSECEF / -DOP / -VELECEF / -TIMEGPS / -EOE
+  [already on by default on USB].
+- Optional: UBX-NAV-TIMEUTC.
 
 ## Saved config
-Goal: dump the live config to `config/f9t/` so it's version-controlled. Known
-working read is the MON-VER poll above; the exact `ubxtool -g <group>` syntax for
-CFG groups is being validated on this device (next step), so treat the commands
-below as the intended method, not yet a proven recipe:
+As-found baseline snapshot: `config/f9t/20260707-041251_asfound.txt` (MON-VER +
+CFG-TMODE/TP/RATE/SIGNAL + TIM_TP_USB, RAM & default layers).
+
+Read a config group from the running device (validated `-g <group>` form):
 ```bash
-# read a config group from the running device (RAM/active layer):
-ubxtool -P 29.25 -f /dev/ttyACM0 -g CFG-TMODE     # to validate
-# then CFG-TP, CFG-MSGOUT, etc., and capture a full baseline into config/f9t/
+ubxtool -P 29.25 -f /dev/ttyACM0 -g CFG-TMODE     # or CFG-TP, CFG-RATE, CFG-SIGNAL
+```
+Write a config item (VALSET). **LAYERS is a decimal bitmask: RAM=1, BBR=2,
+Flash=4.** ubxtool's default when LAYERS is omitted is **RAM+Flash (5)** — so for
+RAM-only you MUST pass `,1`:
+```bash
+ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-MSGOUT-UBX_TIM_TP_USB,1,1   # RAM only
 ```
 
 ## Tooling notes

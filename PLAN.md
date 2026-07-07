@@ -16,7 +16,7 @@ until validated; change-doc block + explicit approval before any commit.
 - `CFG-TMODE-MODE = 0` (navigation / survey-in disabled).
 - Timepulse TP1 enabled: 1 PPS (`PERIOD*=1000000`), 100 ms locked width
   (`LEN_LOCK=100000`), `ALIGN_TO_TOW=1`, `POL=1` (rising), `SYNC_GNSS=1`,
-  `USE_LOCKED=1`; `TIMEGRID_TP1 = 4` (**meaning unresolved**); `ANT_CABLEDELAY
+  `USE_LOCKED=1`; `TIMEGRID_TP1 = 4 = GAL (Galileo)`; `ANT_CABLEDELAY
   = 50 ns`; TP2 disabled.
 - USB message out: NAV PVT/SAT/POSECEF/DOP/VELECEF/TIMEGPS (+SIG/EOE) enabled
   (non-default → a customized config is persisted somewhere); `UBX_TIM_TP_USB
@@ -26,9 +26,11 @@ until validated; change-doc block + explicit approval before any commit.
   off). GLONASS unsupported by this firmware.
 
 ## Open questions to resolve
-1. **`TIMEGRID_TP1 = 4`** — what timescale the PPS is gridded to. Apparent
-   tension with `TIMEREF = 1` (GPS). Resolve authoritatively before deciding
-   whether to change it.
+1. **`TIMEGRID_TP1 = 4`** — RESOLVED: `4 = GAL (Galileo)`, firmware factory
+   default (Int. Desc. Tables 70 & 115), confirmed empirically by TIM-TP
+   `refInfo=0x3` + `week=1402` (GST week). **DECISION 2026-07-07: set to GPS
+   (`TIMEGRID_TP1 = 1`), RAM-only — APPLIED & confirmed** (TIM-TP `refInfo=0x0`,
+   `week=2426`).
 2. **Survey-in vs fixed position** — DECIDED: survey-in, short first pass
    (`SVIN_MIN_DUR ~3600 s`, `SVIN_ACC_LIMIT` a few meters) for first-light
    validation; a longer/tighter survey or a fixed known position can come later.
@@ -37,18 +39,18 @@ until validated; change-doc block + explicit approval before any commit.
 
 ## Steps (each gated on observed result)
 
-### Step 0 — snapshot the as-found config into `config/f9t/`
+### Step 0 — snapshot the as-found config into `config/f9t/` — DONE (config/f9t/20260707-041251_asfound.txt)
 Dump `CFG-TMODE`, `CFG-TP`, `CFG-RATE`, `CFG-SIGNAL`, and the USB `CFG-MSGOUT`
 values (RAM layer) to a versioned `config/f9t/YYYYMMDD_asfound.txt` before any
 change. This is the reproducible "before" and fulfils the docs' "dump live
 config" TODO.
 
-### Step 1 — resolve `TIMEGRID_TP1 = 4`
+### Step 1 — resolve `TIMEGRID_TP1 = 4` — DONE (= GAL/Galileo; decision: switch to GPS)
 Confirm the `CFG-TP-TIMEGRID` enum against the interface description /
 integration manual (in `docs/datasheets/`). Decide: keep as-is, or set to GPS
 (1) / UTC (0). No change until the meaning is confirmed.
 
-### Step 2 — enable UBX-TIM-TP on USB (RAM only)
+### Step 2 — enable UBX-TIM-TP on USB (RAM only) — DONE (RAM; qErr in ps, ±~3.4 ns first-light)
 `CFG-VALSET CFG-MSGOUT-UBX_TIM_TP_USB = 1` in RAM. Read back; confirm
 `UBX-TIM-TP` messages appear and carry a quantization-error field. Capture a
 short sample and inspect qErr — this unblocks Stage 2 and lets us see the
@@ -56,9 +58,10 @@ sawtooth *before* committing to timing mode. Also settles the `parse_pps.py`
 qErr units/field-name TODO against real data.
 
 ### Step 3 — set timing mode: survey-in (RAM only)
-`CFG-TMODE-MODE = 1` (survey-in), `SVIN_MIN_DUR = 3600 s`, `SVIN_ACC_LIMIT` ~ a
-few meters (exact value confirmed at the step). Monitor `UBX-NAV-SVIN` until
-`valid=1`. Record the surveyed position and its variance.
+Preceded by applying the PPS-grid change (`TIMEGRID_TP1 = 1`, GPS, RAM).
+`CFG-TMODE-MODE = 1` (survey-in), `SVIN_MIN_DUR = 3600 s`, `SVIN_ACC_LIMIT`
+(U4, units 0.1 mm) ~ a few meters, e.g. 2 m = `20000`. RAM-only. Monitor
+`UBX-NAV-SVIN` until `valid=1`. Record the surveyed position and its variance.
 
 ### Step 4 — validate timing behavior
 With survey valid and stationary: observe the qErr distribution and confirm
