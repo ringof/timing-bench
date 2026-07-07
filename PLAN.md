@@ -57,11 +57,16 @@ short sample and inspect qErr — this unblocks Stage 2 and lets us see the
 sawtooth *before* committing to timing mode. Also settles the `parse_pps.py`
 qErr units/field-name TODO against real data.
 
-### Step 3 — set timing mode: survey-in (RAM only)
+### Step 3 — set timing mode: survey-in (RAM only) — DONE (dry-run params)
 Preceded by applying the PPS-grid change (`TIMEGRID_TP1 = 1`, GPS, RAM).
-`CFG-TMODE-MODE = 1` (survey-in), `SVIN_MIN_DUR = 3600 s`, `SVIN_ACC_LIMIT`
-(U4, units 0.1 mm) ~ a few meters, e.g. 2 m = `20000`. RAM-only. Monitor
-`UBX-NAV-SVIN` until `valid=1`. Record the surveyed position and its variance.
+`CFG-TMODE-MODE = 1` (survey-in), `SVIN_MIN_DUR`, `SVIN_ACC_LIMIT` (U4, units
+0.1 mm). Monitor **`UBX-TIM-SVIN`** (NOT NAV-SVIN — unsupported on TIM firmware;
+output key `CFG-MSGOUT-UBX_TIM_SVIN_USB` = `0x2091009a`) until `valid=1`.
+- Dry-run pass (2026-07-07): `SVIN_MIN_DUR=120 s`, `SVIN_ACC_LIMIT=1000000`
+  (100 m) — intentionally loose so the pipeline can be exercised before antenna
+  siting. Completed at obs 121; `NAV-PVT fixType 5`.
+- Real pass (after siting): tighter limit (~2 m) + longer duration; record the
+  surveyed position and its variance.
 
 ### Step 4 — validate timing behavior
 With survey valid and stationary: observe the qErr distribution and confirm
@@ -74,9 +79,11 @@ config into `config/f9t/` as the "after" baseline. Update `docs/f9t-setup.md`
 (fill the survey-in / TP TODOs with the values actually used) and the notebook.
 
 ### Step 6 — first real Stage-1 capture
-Run a multi-hour capture (TIM-TP + NAV at 1 Hz) via the collector; reduce with
-`parse_pps.py` + `allan.py`; render plots; notebook entry. This is the first
-genuine Stage-1/Stage-2 data on the bench.
+**Dry-run first** (2026-07-07 onward): a short capture now to validate the
+collect → reduce → plot toolchain end-to-end (and fix the `collect/` +
+`parse_pps.py` stubs against the real ubxtool decode) — accuracy not the point.
+The genuine multi-hour capture (TIM-TP + NAV at 1 Hz) follows antenna siting;
+reduce with `parse_pps.py` + `allan.py`; render plots; notebook entry.
 
 ## Guardrails
 - RAM-first; nothing to Flash/BBR until Step 5 and only if validated.

@@ -16,7 +16,38 @@ negative results are results.
 
 ---
 
-### 2026-07-07 — config baseline; TIM-TP enabled (RAM); PPS grid = Galileo (grid choice OPEN)
+### 2026-07-07 — timing mode via survey-in (dry-run params); TIM-SVIN, not NAV-SVIN
+- **Setup:** ZED-F9T-20B, raw ubxtool, RAM-only changes. Goal for this pass: a
+  **dry run** — get end-to-end through collect → reduce → plot and a good-enough
+  answer *before* investing in antenna siting. So survey accuracy was
+  deliberately loosened.
+- **Capture:** none yet (survey config only); position coarse by design.
+- **Observed / did:**
+  - **Step 3 survey-in.** Set `CFG-TMODE-SVIN_MIN_DUR` + `SVIN_ACC_LIMIT`
+    (`SVIN_ACC_LIMIT` is U4 in **0.1 mm**; 2 m = 20000), verified, then
+    `CFG-TMODE-MODE = 1` (RAM). All RAM-only.
+  - **NAV-SVIN → TIM-SVIN correction.** First attempt enabled
+    `CFG-MSGOUT-UBX_NAV_SVIN_USB` — **NAK'd**: NAV-SVIN isn't supported on this
+    TIM firmware (it's an F9P/HPG message). This firmware reports survey-in via
+    **`UBX-TIM-SVIN` (0x0d 0x04)**; output key `CFG-MSGOUT-UBX_TIM_SVIN_USB`
+    (`0x2091009a`), per the F9 TIM 2.25 Interface Description. Also learned: a
+    multi-item `-z` VALSET is **atomic** — one bad key NAKs the whole batch
+    (which had silently taken `MODE=1` down with it; isolating `MODE=1` ACK'd).
+  - **Accuracy reality check.** With an honest 2 m limit, `TIM-SVIN meanV`
+    ≈ 4.2e8 mm² → 3D σ ≈ **20 m**, falling slowly — reaching 2 m at this antenna
+    spot would likely take hours. Antenna environment is the limiter (matches the
+    earlier nav-mode position wander).
+  - **Dry-run pivot.** Restarted survey with `SVIN_MIN_DUR = 120 s`,
+    `SVIN_ACC_LIMIT = 1000000` (100 m) so it completes on time regardless of
+    accuracy. Completed: `TIM-SVIN valid 1 active 0` at obs 121; `NAV-PVT
+    fixType 5` (time-only). F9T now a stationary timing source (coarse position).
+- **Next:** capture ~2 min of TIM-TP, align `collect/log_ubx_timing.sh` +
+  `parse_pps.py` to the real ubxtool decode, then `allan.py` + gnuplot for the
+  qErr + ADEV answer. A proper long/tight survey comes after antenna siting.
+
+---
+
+### 2026-07-07 — config baseline; TIM-TP enabled (RAM); PPS grid switched to GPS
 - **Setup:** Same bench, still nav mode, raw `ubxtool`; gpsd left stopped.
 - **Capture:** `config/f9t/20260707-041251_asfound.txt` (as-found config snapshot; read-only).
 - **Observed:**

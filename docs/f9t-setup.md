@@ -49,14 +49,19 @@ units if you need it bulletproof for a long unattended run).
 ## Timing mode
 The F9T is a *timing* receiver — put it in stationary mode with a survey-in (or
 a fixed surveyed position) for best timepulse stability. In moving/nav mode the
-timepulse is far noisier. **Currently in nav mode** — confirmed `CFG-TMODE-MODE = 0`.
+timepulse is far noisier.
 
-- [x] Read CFG-TMODE — `MODE = 0` (nav); all position/SVIN fields zero.
-- [ ] Set survey-in: `CFG-TMODE-MODE = 1` (SURVEY_IN). Planned first pass:
-      `SVIN_MIN_DUR = 3600 s`, `SVIN_ACC_LIMIT` (U4, units **0.1 mm**) — e.g.
-      2 m = `20000`. RAM-only during bringup.
-- [ ] Monitor `UBX-NAV-SVIN` until `valid = 1`; record surveyed position + variance.
-- [ ] Confirm survey-in valid before trusting timing captures.
+Monitor survey-in via **`UBX-TIM-SVIN`** (0x0d 0x04), **not** `NAV-SVIN`
+(unsupported on this TIM firmware); output key `CFG-MSGOUT-UBX_TIM_SVIN_USB` =
+`0x2091009a`. `SVIN_ACC_LIMIT` is U4 in units of **0.1 mm** (2 m = `20000`).
+
+- [x] Read CFG-TMODE — `MODE = 0` (nav as-found); all position/SVIN fields zero.
+- [x] Survey-in exercised **dry-run** (2026-07-07): `CFG-TMODE-MODE = 1`,
+      `SVIN_MIN_DUR = 120 s`, `SVIN_ACC_LIMIT = 1000000` (100 m, intentionally
+      loose to validate the pipeline before antenna siting). Completed `valid=1`
+      at obs 121; `NAV-PVT fixType 5`. RAM-only.
+- [ ] Real pass after antenna siting: tighter `SVIN_ACC_LIMIT` (~2 m) + longer
+      `SVIN_MIN_DUR`; confirm `valid=1` before trusting timing captures.
 
 ## Timepulse (TP) config — confirmed from CFG-TP (2026-07-07)
 - TP1 enabled; 1 PPS (`PERIOD_TP1 = PERIOD_LOCK_TP1 = 1000000 µs`).
@@ -80,6 +85,17 @@ On the USB port, at 1 Hz:
   [already on by default on USB].
 - Optional: UBX-NAV-TIMEUTC.
 
+## Reproduce the timing config
+All device changes are RAM-only and revert on power-cycle. To re-apply the bench
+timing configuration (own the port → GPS grid → TIM-TP/TIM-SVIN on → survey-in),
+run the versioned script that captures the exact command sequence:
+```bash
+./config/f9t/apply-timing-config.sh
+# real survey after antenna siting (tighter/longer):
+SVIN_MIN_DUR=3600 SVIN_ACC_LIMIT=20000 ./config/f9t/apply-timing-config.sh
+```
+It grows as more of the pipeline (capture → reduce → plot) is proven.
+
 ## Saved config
 As-found baseline snapshot: `config/f9t/20260707-041251_asfound.txt` (MON-VER +
 CFG-TMODE/TP/RATE/SIGNAL + TIM_TP_USB, RAM & default layers).
@@ -100,3 +116,6 @@ ubxtool -P 29.25 -f /dev/ttyACM0 -z CFG-MSGOUT-UBX_TIM_TP_USB,1,1   # RAM only
   F9T protocol via `-P 29.25`. Confirmed working without sudo on this host.
 - If gpsd is running it will hold `/dev/ttyACM0` (see Intake path). Stop it to
   talk raw, or read through gpsd (gpspipe) — not both at once.
+- A multi-item `-z` VALSET is **atomic**: one unsupported key NAKs the whole
+  batch. Set risky/uncertain keys individually.
+- `UBX-NAV-SVIN` is **not** supported on this TIM firmware — use `UBX-TIM-SVIN`.
