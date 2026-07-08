@@ -7,25 +7,59 @@ PPS-vs-PHC assessment and the "how good is our GM" number.
 
 This is Stage 3 of `docs/00-plan.md` (§3 and the Stage-3 checklist).
 
-> **Status: NOT hardware-validated.** The i226 card and the timeSync breakout
-> are not yet installed. Everything below is a forward-looking runbook derived
-> from documentation and prior planning — treat every step as an *unvalidated
-> guess* until the hardware is present and a real reading confirms it. Nothing
-> here should be read as "confirmed" or "done." Interface names (`enp3s0` is a
-> placeholder), SDP pin/channel indices, and `clockClass`/`clockAccuracy`
-> values in particular are to be **confirmed on the bench**, not trusted as-is.
+> **Status: partially hardware-verified (2026-07-08).** The i226 card IS
+> installed and the **driver / PHC side is confirmed on the bench** (see
+> "Confirmed against hardware" below): interface `enp3s0`, PHC `/dev/ptp0`,
+> 2 EXTTS + 2 perout channels, SDP0–3 exposed and free. What is **still
+> unvalidated** is the PPS-injection path itself — the physical SDP↔PPS-in
+> mapping, the `ts2phc` / `ptp4l` config, and the `clockClass`/`clockAccuracy`
+> values. Treat those as forward-looking guesses until a real reading confirms
+> them. No PPS has been injected yet.
 
 Skeleton config files live in `config/i226/` (`ts2phc.conf`, `ptp4l.conf`,
 `chrony.conf`), each carrying the same `<CONFIRM>` placeholders as the blocks
 below. Do not run them before confirming those values on hardware.
 
+## Confirmed against hardware — 2026-07-08
+
+Driver / PHC side, on host `radio`. The i226 is a **full PCIe card** reporting
+`03:00.0 … Intel I226-LM (rev 04)`; a **6-pin SDP header was soldered onto the
+card** (Intel ships none) and a Timebeat U.FL PPS breakout (50 Ω-termination DIP
+switches) mates to it. No PPS injected yet.
+
+- Host toolchain installed: `linuxptp 4.0`, `pps-tools 1.0.2`, `ethtool`,
+  `gpsd`/`gpsd-clients 3.25`, `chrony 4.5`, `build-essential`,
+  `linux-headers-6.17.0-35`. `testptp` not installed (deferred — see note).
+- `igc` driver in-tree; kernel **6.17.0-35-generic**.
+- Interface **`enp3s0`**, driver `igc`, fw `2020:888d`, bus `0000:03:00.0`.
+  Link DOWN (no cable — irrelevant to PHC work).
+- `ethtool -T enp3s0`: `hardware-transmit`, `hardware-receive`,
+  `hardware-raw-clock`; **PTP Hardware Clock: 0** → `/dev/ptp0`.
+- `/sys/class/ptp/ptp0`: `clock_name f0b2b93551a9` (= enp3s0 MAC → ptp0 is this
+  NIC's PHC); **2 EXTTS + 2 perout** channels; pins **SDP0–SDP3**, all `0 0`
+  (unassigned). (`n_pins` scalar not published by this kernel; the `pins/`
+  directory enumerates the pins.)
+
+**Resolved:** the earlier I226-LM-vs-T1 worry — it's a PCIe card with the SDP
+header soldered on, so the breakout attaches and driver-level EXTTS injection is
+viable.
+
+**Still open:**
+- Which U.FL / SDP is the **PPS-in** (→ `ts2phc.pin_index` / `channel`).
+  Timebeat's pinout wasn't retrievable (store/community pages 403). Determine it
+  **empirically** — arm the EXTTS channels and see which SDP logs edges once the
+  F9T pulse is on the PPS-in connector.
+- **Software stack undecided:** Timebeat's sync daemon vs. linuxptp
+  `ts2phc`/`ptp4l`. The Timebeat breakout's own config uses Timebeat "pin/index"
+  semantics (index 0 = PPS-in); the `config/i226/` skeletons here assume
+  linuxptp. Pick one before wiring config.
+
 ## What's in scope
 
-- **Now (no hardware needed):** install the host-side toolchain so the box is
-  ready the day the card arrives.
-- **When the card + breakout arrive:** verify → wire → discipline → inject →
-  serve, one gated step at a time, each confirmed by an observed reading before
-  the next.
+- **Done (2026-07-08):** host toolchain installed; i226 card / PHC verified on
+  the bench (see "Confirmed against hardware").
+- **Remaining:** wire → discipline → inject → serve, one gated step at a time,
+  each confirmed by an observed reading before the next.
 
 ## Prep now — install the toolchain
 
@@ -71,45 +105,52 @@ SDP/EXTTS support is **kernel-version-dependent**. If on an older LTS kernel,
 the HWE kernel may give better `igc` timing support. Decide that only after
 seeing what `ethtool -T` and `testptp` actually report — do not assume.
 
-### testptp — get it on hand
+### testptp — deferred, not needed for the runtime path
 
-`testptp` is what confirms which SDP the F9T PPS lands on. It's not always
-packaged; it lives in the kernel selftests tree.
+**Decision 2026-07-08: don't build it yet.** `ts2phc` sets the SDP pin function
+and consumes the EXTTS edges itself, so the runtime path (`ts2phc` → `ptp4l`)
+doesn't need `testptp`, and its capability/pin listing is already available from
+sysfs (`/sys/class/ptp/ptp0/…`). Its one unique value is **`testptp -e`** — raw
+EXTTS edge capture in isolation from `ts2phc` — which is a useful *first-light
+debug probe* only: if `ts2phc` shows nothing, `testptp -e` distinguishes "no
+pulse / wrong pin" (physical) from "pin arriving, `ts2phc` misconfigured".
 
-```bash
-which testptp          # Option A: sometimes shipped with linuxptp / kernel tools
+If/when needed, it's one file, builds in seconds — grab `testptp.c` from the
+kernel tree matching `uname -r` and `gcc -o testptp testptp.c -lrt`.
+(`which testptp` on this box: not installed.)
 
-# Option B: build from kernel selftests source (single file)
-#   grab testptp.c matching `uname -r`, then:
-#   gcc -o testptp testptp.c -lrt
-```
+## Bring-up steps (card + breakout in hand)
 
-Grab `testptp.c` from the kernel tree matching `uname -r`; it builds in seconds.
+Each step gated on an observed reading before moving on (per CLAUDE.md). Step 1
+is done; steps 2 onward remain.
 
-## When the card + breakout arrive
-
-Each step gated on an observed reading before moving on (per CLAUDE.md).
-
-### 1. Verify the i226 and its PHC
+### 1. Verify the i226 and its PHC — DONE (2026-07-08)
 
 ```bash
 lspci | grep -i i226
-ethtool -i <iface>        # confirm driver = igc
-ethtool -T <iface>        # confirm PHC + HW timestamping capabilities
+ethtool -i enp3s0         # driver = igc (confirmed)
+ethtool -T enp3s0         # PHC + HW timestamping caps (confirmed)
+cat /sys/class/ptp/ptp0/n_external_timestamps   # EXTTS channels: 2
+ls /sys/class/ptp/ptp0/pins/                     # SDP0..SDP3
 ```
 
-Want to see `hardware-transmit`, `hardware-receive`, `hardware-raw-clock`, and
-a PTP Hardware Clock index. Record the actual interface name — `enp3s0` in the
-config skeletons is a **placeholder**; use what the box reports.
+Confirmed on the bench: `enp3s0` (real name, not a placeholder), `/dev/ptp0`,
+`hardware-transmit`/`-receive`/`-raw-clock`, 2 EXTTS + 2 perout, SDP0–3 free.
+See "Confirmed against hardware — 2026-07-08" above for the full readout.
 
 ### 2. Wire the F9T PPS into an SDP pin
 
-Route the **ZED-F9T-20B** TIMEPULSE output to one of the i226 SDP header pins.
-The i226 SDPs are 3.3 V tolerant and F9T TIMEPULSE is 3.3 V, so a direct
-connection usually works (a series resistor is cheap insurance); level-shift if
-the header turns out to be different logic. Common shared GND. **Note which
-physical header pin maps to which SDP number** from the card's header docs —
-this is board-specific and must be read off the actual hardware.
+Hardware in hand: a **6-pin SDP header soldered onto the i226 PCIe card** with a
+**Timebeat U.FL PPS breakout** attached (U.FL coax; 50 Ω-termination DIP
+switches per connector). Route the **ZED-F9T-20B** TIMEPULSE output to the
+breakout's **PPS-in** U.FL. The i226 SDPs are 3.3 V and F9T TIMEPULSE is 3.3 V,
+so no level-shift; common shared GND.
+
+**Which SDP the PPS-in maps to is not yet known** (Timebeat's pinout wasn't
+retrievable). Rather than trust a datasheet, determine it **empirically** once
+the pulse is on the connector: arm the EXTTS channels and see which of SDP0–3
+starts logging edges. That SDP number becomes `ts2phc.pin_index` / `channel`
+(step 4). F9T POL_TP1=1 → rising edge.
 
 ### 3. Put the F9T in timing mode
 
@@ -141,7 +182,9 @@ ts2phc.pin_index 0            # <CONFIRM> driver SDP pin index (testptp -e)
 ```
 
 ```bash
-testptp -e                                   # find the live EXTTS pin index first
+# ts2phc arms the SDP EXTTS itself; run it and watch the -m offset settle.
+# (Only if edges don't show, build testptp and `testptp -e` to isolate physical
+#  vs config — see the testptp note above.)
 ts2phc -c config/i226/ts2phc.conf -s generic -m
 ```
 
@@ -215,11 +258,14 @@ pmc -u -b 0 'GET TIME_STATUS_NP'     # ptp4l master offset
 
 ## Open items to confirm on hardware
 
-- [ ] Real interface name (not `enp3s0`).
-- [ ] `ethtool -T` output: PHC index + timestamping caps.
-- [ ] Kernel version vs. `igc` SDP/EXTTS support; HWE kernel needed?
-- [ ] Which physical SDP header pin the vendor routed, and its driver
-      `pin_index` / `channel` (`testptp -e`, `dmesg | grep igc`).
+- [x] Real interface name — `enp3s0` (confirmed 2026-07-08).
+- [x] `ethtool -T` output: PHC index 0 + hw tx/rx/raw-clock (confirmed).
+- [x] `igc` SDP/EXTTS support on this kernel — 2 EXTTS + 2 perout, SDP0–3
+      exposed on 6.17.0-35 (confirmed); no HWE kernel needed.
+- [ ] Which U.FL / SDP the PPS-in maps to → `ts2phc.pin_index` / `channel`
+      (determine empirically — arm EXTTS, watch which SDP logs edges).
+- [ ] **Software stack:** Timebeat sync daemon vs. linuxptp `ts2phc`/`ptp4l`.
+- [ ] F9T TIMEPULSE wired to breakout PPS-in and F9T locked/emitting.
 - [ ] `/dev/ppsN` device node for the routed PPS.
 - [ ] `clockClass` / `clockAccuracy` that match the actual locked state.
 - [ ] Target PTP profile (default vs. AES67 / SMPTE 2110) — affects

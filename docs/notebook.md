@@ -16,6 +16,38 @@ negative results are results.
 
 ---
 
+### 2026-07-08 — i226 Stage-3 prep: driver/PHC side verified on the bench
+- **Setup:** Host `radio`. Intel **i226 PCIe card** (`lspci: 03:00.0 … I226-LM
+  rev 04`) with a **user-soldered 6-pin SDP header** + a **Timebeat U.FL PPS
+  breakout** (50 Ω-term DIP switches). F9T **not** wired to the breakout yet; no
+  PPS injected.
+- **Toolchain:** installed `linuxptp 4.0`, `pps-tools 1.0.2`, `ethtool`,
+  `gpsd`/`gpsd-clients 3.25`, `chrony 4.5`, build-essential,
+  `linux-headers-6.17.0-35`. `igc` in-tree, kernel **6.17.0-35-generic**.
+  `testptp` **not** installed (deferred — `ts2phc` doesn't need it; keep
+  `testptp -e` as a first-light debug probe only).
+- **Confirmed (hardware):**
+  - `enp3s0`, driver igc, fw `2020:888d`, bus `0000:03:00.0`; link DOWN (no
+    cable — fine for PHC).
+  - `ethtool -T enp3s0`: hw tx/rx + hardware-raw-clock; **PTP Hardware Clock:
+    0** → `/dev/ptp0`.
+  - `/sys/class/ptp/ptp0`: `clock_name f0b2b93551a9` (= enp3s0 MAC, confirms
+    ptp0↔enp3s0); **2 EXTTS + 2 perout**; **SDP0–SDP3**, all `0 0` (unassigned).
+    (`n_pins` scalar absent this kernel; `pins/` enumerates them.)
+- **Resolved:** the LM-vs-T1 physical worry — it's a PCIe card with the SDP
+  header soldered on, so the breakout attaches; driver-level EXTTS injection is
+  viable.
+- **Open:** which U.FL/SDP is **PPS-in** (→ `ts2phc.pin_index`/`channel`) —
+  Timebeat pinout unreachable (403), so find it **empirically** (arm EXTTS, see
+  which SDP logs edges once the F9T pulse is on the connector). Also undecided:
+  **Timebeat sync daemon vs. linuxptp `ts2phc`/`ptp4l`** (breakout config uses
+  Timebeat "pin/index", index 0 = PPS-in; the `config/i226/` skeletons assume
+  linuxptp).
+- **Next:** confirm F9T pulse wired to breakout PPS-in and F9T locked/emitting;
+  then one edge-arm to identify the SDP.
+
+---
+
 ### 2026-07-07 (afternoon) — config as plain commands; config script removed
 - **Setup:** F9T on USB; re-applied the timing config.
 - **What happened:** `config/f9t/apply-timing-config.sh` overreached — its
