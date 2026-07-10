@@ -16,6 +16,38 @@ negative results are results.
 
 ---
 
+### 2026-07-10 — i226 PHC locked to the F9T PPS via ts2phc (Stage 3 first light)
+- **Setup:** Host `radio`. F9T (timing mode, `fixType 5`, tAcc ~55 ns, 12 SV,
+  GPS grid) TIMEPULSE → Timebeat U.FL breakout PPS-in → i226 SDP0. gpsd stopped.
+- **Path proven end to end:** F9T pulse → i226 EXTTS → `ts2phc` → `/dev/ptp0`
+  (enp3s0) disciplined. Config + run in `config/i226/ts2phc.conf` and
+  `docs/i226-bringup.md` steps 4–5.
+- **Observed (ts2phc -m):** servo `s0→s1→s2`; steady-state offset **~±10 ns**
+  (mostly single digits), **freq ~+10010 ppb (+10 ppm)** — matches the PHC
+  free-run measured independently via testptp (rising edges 1.00001 s apart).
+  Two methods agree.
+- **Gotchas nailed (each cost a cycle):**
+  1. **50 Ω termination collapses the pulse.** F9T TIMEPULSE is weak CMOS; can't
+     drive 50 Ω. DIP off → pulse survives (PPS LED cross-check). ON → LED dark.
+  2. **testptp header skew.** `linux-libc-dev` is 6.8 on Ubuntu 24.04 even under
+     the 6.17 kernel → build testptp from **v6.8** source, not master/v6.17.
+  3. **ts2phc `-f` vs `-c`.** `-c` = add a PHC *sink*, not config; config is
+     `-f`. And `ts2phc.master 1` makes the NIC a perout *generator* (strace:
+     `PTP_PF_PEROUT` + `PTP_PEROUT_REQUEST2`), not an EXTTS reader — use
+     `-s generic -c enp3s0`, no master.
+  4. **igc is both-edges-only.** `extts_polarity rising` → `PTP_EXTTS_REQUEST2
+     failed: EOPNOTSUPP`. Fix (linuxptp maintainer): `extts_polarity both` +
+     `ts2phc.pulsewidth 100000000` (the 100 ms F9T pulse) so ts2phc drops the
+     falling edge. testptp worked throughout because it uses the legacy flagless
+     `PTP_EXTTS_REQUEST`. No timing penalty — rising edge still HW-timestamped.
+- **Boundary:** ±10 ns is ts2phc's servo residual (self-report), not a measured
+  PHC-vs-independent-clock number. That characterization (offset log + ADEV) is
+  the next capture.
+- **Next:** capture the ts2phc offset series over a long run → reduce (ADEV,
+  distribution); then chrony (system clock) + ptp4l grandmaster (steps 6–7).
+
+---
+
 ### 2026-07-08 — i226 Stage-3 prep: driver/PHC side verified on the bench
 - **Setup:** Host `radio`. Intel **i226 PCIe card** (`lspci: 03:00.0 … I226-LM
   rev 04`) with a **user-soldered 6-pin SDP header** + a **Timebeat U.FL PPS

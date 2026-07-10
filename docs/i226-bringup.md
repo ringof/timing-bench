@@ -7,14 +7,13 @@ PPS-vs-PHC assessment and the "how good is our GM" number.
 
 This is Stage 3 of `docs/00-plan.md` (§3 and the Stage-3 checklist).
 
-> **Status: partially hardware-verified (2026-07-08).** The i226 card IS
-> installed and the **driver / PHC side is confirmed on the bench** (see
-> "Confirmed against hardware" below): interface `enp3s0`, PHC `/dev/ptp0`,
-> 2 EXTTS + 2 perout channels, SDP0–3 exposed and free. What is **still
-> unvalidated** is the PPS-injection path itself — the physical SDP↔PPS-in
-> mapping, the `ts2phc` / `ptp4l` config, and the `clockClass`/`clockAccuracy`
-> values. Treat those as forward-looking guesses until a real reading confirms
-> them. No PPS has been injected yet.
+> **Status: PPS→PHC validated (2026-07-10).** The i226 card is installed and the
+> **full PPS-injection path works on the bench**: the F9T 1 PPS lands on SDP0,
+> and `ts2phc` locks `/dev/ptp0` (enp3s0) to it — servo `s2`, steady-state
+> offset ~±10 ns, freq ~+10 ppm (steps 1–5 below). What is **still unvalidated**
+> is the *serving* side — chrony (system clock) and the `ptp4l` grandmaster
+> (steps 6–7), including the `clockClass`/`clockAccuracy` values. Treat those as
+> forward-looking guesses until a real reading confirms them.
 
 Skeleton config files live in `config/i226/` (`ts2phc.conf`, `ptp4l.conf`,
 `chrony.conf`), each carrying the same `<CONFIRM>` placeholders as the blocks
@@ -134,8 +133,9 @@ drop to `v6.6`.
 ## Bring-up steps (card + breakout in hand)
 
 Each step gated on an observed reading before moving on (per CLAUDE.md). Steps
-1–4 are done (i226/PHC verified, pulse wired, F9T in timing mode, SDP0
-identified); steps 5 onward (ts2phc → chrony → ptp4l → reduce) remain.
+1–5 are done (i226/PHC verified, pulse wired, F9T in timing mode, SDP0
+identified, PHC locked to the PPS via ts2phc); steps 6 onward (chrony → ptp4l →
+reduce) remain.
 
 ### 1. Verify the i226 and its PHC — DONE (2026-07-08)
 
@@ -203,37 +203,59 @@ rising edge, a falling edge **100.0 ms** later (matches `LEN_LOCK_TP1`), then
 the next rising edge **~1.00001 s** on — i.e. 1 PPS, 100 ms wide, with the PHC
 free-running about **+10 ppm** (uncorrected; `ts2phc` pulls that out next).
 SDP1–3 armed cleanly but saw no edges. → hardware-confirmed
-`ts2phc.pin_index 0`, `ts2phc.channel 0`, `extts_polarity rising`.
+`ts2phc.pin_index 0`, `ts2phc.channel 0`. (Polarity ends up `both`, not
+`rising` — igc is both-edges-only; see the gotcha in step 5.)
 
-### 5. Get PPS into the PHC (the nanosecond part)
-
-Two paths — pick based on how it's wired:
+### 5. Get PPS into the PHC (ts2phc) — DONE (2026-07-10)
 
 **Path A — PPS on an SDP as EXTTS (recommended; keeps it on the NIC clock).**
-`ts2phc` reads the PPS edge on the SDP EXTTS channel and steers the PHC to it,
-at hardware-timestamp resolution — no OS jitter in the path. This is what earns
-"nanosecond accuracy." Skeleton: `config/i226/ts2phc.conf`:
+`ts2phc` reads the rising PPS edge on the SDP EXTTS channel and steers the PHC
+to it at hardware-timestamp resolution — no OS jitter in the path. Validated
+config `config/i226/ts2phc.conf`:
 
 ```ini
 [global]
-use_syslog 1
+use_syslog 0
 first_step_threshold 0.00002
-[enp3s0]                       # <CONFIRM> real interface
-ts2phc.channel 0              # <CONFIRM> SDP EXTTS channel the PPS is on
-ts2phc.extts_polarity rising  # F9T POL_TP1=1 (rising)
-ts2phc.pin_index 0            # <CONFIRM> driver SDP pin index (testptp -e)
+ts2phc.pulsewidth 100000000    # F9T 100 ms LEN_LOCK_TP1; used to drop the falling edge
+[enp3s0]
+ts2phc.extts_polarity both     # igc is both-edges-only (see gotcha)
+ts2phc.pin_index 0             # SDP0 (step 4)
+ts2phc.channel 0
 ```
 
 ```bash
-# ts2phc arms the SDP EXTTS itself; run it and watch the -m offset settle.
-# (Only if edges don't show, build testptp and `testptp -e` to isolate physical
-#  vs config — see the testptp note above.)
-ts2phc -c config/i226/ts2phc.conf -s generic -m
+sudo ts2phc -f config/i226/ts2phc.conf -s generic -c enp3s0 -m
 ```
+
+Invocation notes — each one cost a debug cycle, so heed them:
+- **`-f` is the config flag.** ts2phc's `-c` means "add a PHC *sink*", not a
+  config file (`-c /path/to.conf` → "failed to open clock").
+- **`-s generic`** = the reference is an external 1-PPS with no ToD (the F9T
+  edge). Do **not** set `ts2phc.master 1` — that makes the NIC a PPS *generator*
+  (perout output), the opposite of reading the pulse in.
+- **`-c enp3s0`** names the sink: the same NIC's PHC, disciplined from its EXTTS.
+
+**igc gotcha — `PTP_EXTTS_REQUEST2 failed: Operation not supported`.** igc
+timestamps **both edges only**; it can't do rising-only, so the rising +
+strict-flag `PTP_EXTTS_REQUEST2` that ts2phc sends for `extts_polarity rising`
+is rejected (EOPNOTSUPP). Fix (per the linuxptp maintainer — a config change,
+not a code patch): set `extts_polarity both` **and** set `ts2phc.pulsewidth` to
+the real pulse width; ts2phc then requests both edges (which igc supports) and
+uses the width to ignore the falling one. (testptp works throughout because it
+uses the legacy flagless `PTP_EXTTS_REQUEST`.) No timing penalty: the rising
+edge is still the hardware timestamp; the falling edge is dropped in software
+after capture.
+
+**Result:** PHC locked to the F9T PPS — servo `s2`, steady-state offset
+**~±10 ns**, `freq ~+10 ppm` (matches the free-run measured via testptp in
+step 4 — two independent methods agree). This offset is ts2phc's servo residual
+(a self-report, like the F9T's qErr); a proper characterization (offset series +
+ADEV, ideally vs. an independent clock) is the next capture, not this glimpse.
 
 **Path B — discipline system clock (chrony) then push to PHC with `phc2sys`.**
 Lower quality (routes through the CPU clock). Use only if EXTTS can't be made to
-work.
+work. Not needed — Path A works.
 
 ### 6. Discipline the system clock (chrony, independent path)
 
