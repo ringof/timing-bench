@@ -16,6 +16,40 @@ negative results are results.
 
 ---
 
+### 2026-07-10 (afternoon) — ts2phc capture→reduce pipeline validated; long run started
+- **Setup:** Same path (F9T → i226 SDP0 → ts2phc → `/dev/ptp0`, locked). Goal:
+  prove the capture→reduce chain on a short run before committing to a long one.
+- **Config parse bug (fixed, commit 8c52393):** `config/i226/ts2phc.conf` had
+  inline `#` comments on value lines. linuxptp's parser takes *everything after
+  the key* as the value → `malformed value for option ts2phc.pulsewidth /
+  failed to parse`. Only full-line `#` comments are allowed; values must be
+  **bare**.
+- **Capture:** `ts2phc … -m | tee data/ts2phc_testrun_20260710-153242.log`
+  (2 min, 120 samples). Reduce = offset is whitespace **field 4** of the `-m`
+  line → `awk '{print $4}'` → `allan.py --col offset_ns --ns`.
+- **Observed:**
+  - Raw ADEV(1 s) = **185 ns** — *not the real number*; dominated by the
+    lock-in transient (−2250 ns re-acquisition in the first ~10 s).
+  - Trimmed (drop first 15 samples, through settle): mean **0.01 ns**, **RMS
+    4.15 ns**, **ADEV(1 s) = 9.5 ns → ~τ⁻¹ → 0.18 ns @ 32 s**. White-phase /
+    quantization, same character as the F9T qErr. Cross-check √3·RMS ≈ 7.2 ns ≈
+    ADEV(1 s) — consistent.
+- **Learned:** the pre-`s2` lock-in transient **must be trimmed** before ADEV or
+  it swamps short τ. The awk extraction is throwaway; a committed
+  `reduce/parse_ts2phc.py` (parse `-m`, auto-drop pre-lock) is TODO before
+  reducing the long run.
+- **Long run:** started backgrounded, line-buffered, disconnect-safe —
+  `sudo nohup stdbuf -oL ts2phc -f config/i226/ts2phc.conf -s generic -c enp3s0
+  -m > data/ts2phc_longrun_20260710-154402.log &`. One long-lived process
+  (ts2phc is a stable daemon — no segment rotation, unlike the UBX collector).
+  Stop: `sudo pkill -f 'ts2phc -f config/i226'`.
+- **Boundary:** still ts2phc's servo self-report (PHC vs its own PPS reference),
+  not vs an independent clock.
+- **Next:** soak (hours/overnight) → write `reduce/parse_ts2phc.py` → reduce +
+  plot → the headline PHC-vs-PPS ADEV.
+
+---
+
 ### 2026-07-10 — i226 PHC locked to the F9T PPS via ts2phc (Stage 3 first light)
 - **Setup:** Host `radio`. F9T (timing mode, `fixType 5`, tAcc ~55 ns, 12 SV,
   GPS grid) TIMEPULSE → Timebeat U.FL breakout PPS-in → i226 SDP0. gpsd stopped.
