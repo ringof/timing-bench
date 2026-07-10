@@ -217,12 +217,17 @@ config `config/i226/ts2phc.conf`:
 [global]
 use_syslog 0
 first_step_threshold 0.00002
-ts2phc.pulsewidth 100000000    # F9T 100 ms LEN_LOCK_TP1; used to drop the falling edge
+ts2phc.pulsewidth 100000000
 [enp3s0]
-ts2phc.extts_polarity both     # igc is both-edges-only (see gotcha)
-ts2phc.pin_index 0             # SDP0 (step 4)
+ts2phc.extts_polarity both
+ts2phc.pin_index 0
 ts2phc.channel 0
 ```
+
+Values must be **bare** — linuxptp's parser takes everything after the key as
+the value, so an inline `#` comment gives "malformed value / failed to parse".
+`pulsewidth` = the F9T 100 ms `LEN_LOCK_TP1`; `extts_polarity both` per the igc
+gotcha below; `pin_index 0` = SDP0 (step 4).
 
 ```bash
 sudo ts2phc -f config/i226/ts2phc.conf -s generic -c enp3s0 -m
