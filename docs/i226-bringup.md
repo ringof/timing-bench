@@ -105,24 +105,37 @@ SDP/EXTTS support is **kernel-version-dependent**. If on an older LTS kernel,
 the HWE kernel may give better `igc` timing support. Decide that only after
 seeing what `ethtool -T` and `testptp` actually report — do not assume.
 
-### testptp — deferred, not needed for the runtime path
+### testptp — the first-light EXTTS probe (built 2026-07-10)
 
-**Decision 2026-07-08: don't build it yet.** `ts2phc` sets the SDP pin function
-and consumes the EXTTS edges itself, so the runtime path (`ts2phc` → `ptp4l`)
-doesn't need `testptp`, and its capability/pin listing is already available from
-sysfs (`/sys/class/ptp/ptp0/…`). Its one unique value is **`testptp -e`** — raw
-EXTTS edge capture in isolation from `ts2phc` — which is a useful *first-light
-debug probe* only: if `ts2phc` shows nothing, `testptp -e` distinguishes "no
-pulse / wrong pin" (physical) from "pin arriving, `ts2phc` misconfigured".
+`ts2phc` sets the SDP pin function and consumes EXTTS edges itself, so the
+*runtime* path (`ts2phc` → `ptp4l`) doesn't need `testptp`. Its value is
+**`testptp -e`** — raw, read-only EXTTS edge capture in isolation from `ts2phc`
+— which is the clean way to prove "the pulse is physically arriving on this SDP"
+before touching the PHC. We built it to identify the PPS's SDP (step 4).
 
-If/when needed, it's one file, builds in seconds — grab `testptp.c` from the
-kernel tree matching `uname -r` and `gcc -o testptp testptp.c -lrt`.
-(`which testptp` on this box: not installed.)
+**Header-skew gotcha (important).** `testptp.c` compiles against the *userspace*
+uapi header `/usr/include/linux/ptp_clock.h`, which ships in `linux-libc-dev` —
+on Ubuntu 24.04 that is **6.8-based even under a 6.17 HWE kernel**. A newer
+`testptp.c` (`master`, `v6.17`) references
+`struct ptp_sys_offset_extended.clockid` (added after 6.8) and **fails to
+compile**. Fix: fetch the `testptp.c` matching the **userspace headers (v6.8)**,
+not the running kernel.
+
+```bash
+cd /tmp
+curl -sSL -o testptp.c \
+  https://raw.githubusercontent.com/torvalds/linux/v6.8/tools/testing/selftests/ptp/testptp.c
+gcc -Wall -o testptp testptp.c -lrt && ls -l /tmp/testptp
+```
+
+Built in `/tmp` (not a repo artifact). If v6.8 still trips on a missing field,
+drop to `v6.6`.
 
 ## Bring-up steps (card + breakout in hand)
 
-Each step gated on an observed reading before moving on (per CLAUDE.md). Step 1
-is done; steps 2 onward remain.
+Each step gated on an observed reading before moving on (per CLAUDE.md). Steps
+1–4 are done (i226/PHC verified, pulse wired, F9T in timing mode, SDP0
+identified); steps 5 onward (ts2phc → chrony → ptp4l → reduce) remain.
 
 ### 1. Verify the i226 and its PHC — DONE (2026-07-08)
 
@@ -146,11 +159,17 @@ switches per connector). Route the **ZED-F9T-20B** TIMEPULSE output to the
 breakout's **PPS-in** U.FL. The i226 SDPs are 3.3 V and F9T TIMEPULSE is 3.3 V,
 so no level-shift; common shared GND.
 
-**Which SDP the PPS-in maps to is not yet known** (Timebeat's pinout wasn't
-retrievable). Rather than trust a datasheet, determine it **empirically** once
-the pulse is on the connector: arm the EXTTS channels and see which of SDP0–3
-starts logging edges. That SDP number becomes `ts2phc.pin_index` / `channel`
-(step 4). F9T POL_TP1=1 → rising edge.
+**Gotcha — 50 Ω termination kills the pulse (confirmed 2026-07-10).** The
+breakout's per-connector 50 Ω-termination DIP switch must be **OFF** for the
+F9T. The F9T TIMEPULSE is a weak CMOS push-pull output and cannot drive a 50 Ω
+load to ground (~66 mA at 3.3 V) — with termination ON the high level collapses
+and the pulse dies (seen as the board's PPS LED going dark while connected).
+With termination OFF the SDP is a hi-Z input and the pulse survives. 50 Ω
+termination is for line-driver PPS sources, not a GPIO.
+
+Timebeat's pinout wasn't retrievable, so which SDP the PPS-in maps to was
+determined **empirically** (step 4): it is **SDP0**. F9T POL_TP1=1 → rising
+edge.
 
 ### 3. Put the F9T in timing mode
 
@@ -162,7 +181,31 @@ params there are intentionally loose (100 m / 120 s); tighten
 (`SVIN_ACC_LIMIT ~20000` = 2 m, longer `SVIN_MIN_DUR`) for the real pass after
 antenna siting. Confirm `UBX-TIM-SVIN valid 1` before trusting the PPS.
 
-### 4. Get PPS into the PHC (the nanosecond part)
+### 4. Identify which SDP receives the PPS — DONE (2026-07-10, EXTTS loop check)
+
+With the F9T locked and emitting (step 3) and the breakout's 50 Ω termination
+**off** (step 2), arm each SDP as an EXTTS input and see which one logs edges.
+Read-only — `testptp` does not steer the PHC; `/dev/ptp0` needs root.
+
+```bash
+for p in 0 1 2 3; do
+  echo "== SDP$p (pin index $p) =="
+  sudo timeout 5 /tmp/testptp -d /dev/ptp0 -i 0 -L $p,1 -e 3
+done
+```
+
+`-L p,1` sets pin index `p` to EXTTS on channel 0 (`-i 0`); `-e 3` reads three
+events; `timeout` bounds a silent pin. The SDP printing `event index 0 at
+<sec>.<nsec>` lines ~1 s apart is the one the PPS-in maps to.
+
+**Result:** the F9T pulse lands on **SDP0** (pin index 0). The events showed a
+rising edge, a falling edge **100.0 ms** later (matches `LEN_LOCK_TP1`), then
+the next rising edge **~1.00001 s** on — i.e. 1 PPS, 100 ms wide, with the PHC
+free-running about **+10 ppm** (uncorrected; `ts2phc` pulls that out next).
+SDP1–3 armed cleanly but saw no edges. → hardware-confirmed
+`ts2phc.pin_index 0`, `ts2phc.channel 0`, `extts_polarity rising`.
+
+### 5. Get PPS into the PHC (the nanosecond part)
 
 Two paths — pick based on how it's wired:
 
@@ -192,7 +235,7 @@ ts2phc -c config/i226/ts2phc.conf -s generic -m
 Lower quality (routes through the CPU clock). Use only if EXTTS can't be made to
 work.
 
-### 5. Discipline the system clock (chrony, independent path)
+### 6. Discipline the system clock (chrony, independent path)
 
 chrony keeps the OS clock sane from the F9T NMEA + PPS, independently of the
 PHC. Add these refclock lines to the host's `/etc/chrony/chrony.conf`
@@ -206,7 +249,7 @@ refclock PPS /dev/pps0 lock NMEA refid PPS prefer
 `/dev/pps0` is a **placeholder** — depends on how PPS is routed (kernel
 `pps-gpio` or SDP-derived).
 
-### 6. Run the PTP grandmaster (ptp4l)
+### 7. Run the PTP grandmaster (ptp4l)
 
 With the PHC locked to GPS, serve PTP. Skeleton: `config/i226/ptp4l.conf`:
 
@@ -227,7 +270,7 @@ ptp4l -f config/i226/ptp4l.conf -i <iface> --step_threshold=1 -m
 2110 media profiles differ (domain / priorities / dscp) — that's a separate
 decision, not baked in here.
 
-### 7. Reduce & plot
+### 8. Reduce & plot
 
 Collector reads EXTTS timestamps → PHC-vs-PPS offset series → offset plot +
 Allan deviation (the headline GM number). Extend collectors to scrape
