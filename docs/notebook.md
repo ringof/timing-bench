@@ -16,6 +16,55 @@ negative results are results.
 
 ---
 
+### 2026-07-11 — Stage 3 characterized: 10.25 h ts2phc long run (PHC vs F9T PPS)
+- **Setup:** i226 PHC (`/dev/ptp0`, enp3s0) disciplined from the F9T 1 PPS on
+  SDP0 via `ts2phc` (`config/i226/ts2phc.conf`). 10.25 h unattended capture.
+- **Capture:** `data/ts2phc_longrun_20260710-154402.log` — 36,915 lines @ 1 Hz.
+  ts2phc held servo `s2` (locked) for all but the first sample: **zero relocks**
+  over 10+ h; `.err` clean.
+- **Reduce:** `reduce/parse_ts2phc.py` (drops pre-`s2` + 30-sample settle guard,
+  gap/relock-aware) → `data/ts2phc_longrun.tsv` (`elapsed_s/offset_ns/freq_ppb`,
+  36,884 kept). `reduce/allan.py --col offset_ns --ns` →
+  `data/ts2phc_longrun.adev.tsv`. Plots: `plots/ts2phc_offset.gp` (offset+freq),
+  `plots/adev.gp` (ADEV).
+- **Observed:**
+  - **Offset:** mean **0.03 ns**, **RMS 4.69 ns** — a flat ±10 ns band.
+    (`out/ts2phc_offset.png`)
+  - **ADEV:** clean **τ⁻¹ over 14 octaves**, 9.2e-9 @1 s → 5.0e-13 @16384 s;
+    white-phase / quantization-limited, no floor. (`out/adev.png`)
+  - **Freq:** non-monotonic **thermal** excursion, ~**0.9 ppm peak-to-peak**
+    (hump → plateau ~+9775 ppb → sharp step to ~+10700 ppb with ~25-min
+    oscillations in the last ~2 h) — a bare i226 XO, no TCXO, breathing with the
+    room. The loop **absorbs** it: freq swings while offset stays flat.
+    (`out/ts2phc_freq.png`)
+  - **Transient:** a cluster of phase outliers (−66/−56/−43 ns) at t≈10.5–12 ks
+    (~3 h in), no lock loss, quick recovery. **Cause: a robot vacuum jostled the
+    bench** (on-site obs) — U.FL/coax mechanical sensitivity. Strong
+    timing+mechanical correlation, not provable from the ts2phc log alone.
+- **Learned:**
+  - Disciplining works: the PHC tracks the PPS to **4.7 ns RMS / τ⁻¹** straight
+    through a ~0.9 ppm thermal frequency swing (incl. a sharp step).
+  - **Mechanically sensitive:** a passing robot vacuum = a −66 ns glitch.
+    Strain-relief the U.FL/coax + antenna lead for clean runs; keep the vacuum
+    away. The servo recovered gracefully (good robustness data point).
+  - **Prediction miss (mine):** I expected a long-τ ADEV upturn from the drift.
+    Wrong — ts2phc corrects the frequency so it never leaks into phase; ADEV
+    stays τ⁻¹. Also mischaracterized the drift as +0.35 ppm monotonic (start-vs-
+    tail); it's ~0.9 ppm non-monotonic thermal.
+- **Boundary:** this is the **servo tracking residual** (PHC vs its own PPS
+  reference), NOT absolute accuracy vs an independent clock. The F9T/GPS sets
+  the real long-τ limit; that independent comparison is future work.
+- **Artifacts:** config `config/i226/ts2phc.conf`; reduce
+  `reduce/parse_ts2phc.py` + `reduce/allan.py`; plots `plots/ts2phc_offset.gp` +
+  `plots/adev.gp`; data `data/ts2phc_longrun.tsv` + `.adev.tsv` (raw
+  `data/ts2phc_longrun_20260710-154402.log`); images `out/adev.png`,
+  `out/ts2phc_offset.png`, `out/ts2phc_freq.png`.
+- **Next:** chrony (system clock) + `ptp4l` grandmaster (steps 6–7; note the
+  `ptp4l.conf` inline-comment fix still owed); eventually antenna siting + an
+  independent-clock comparison for the absolute number.
+
+---
+
 ### 2026-07-10 (afternoon) — ts2phc capture→reduce pipeline validated; long run started
 - **Setup:** Same path (F9T → i226 SDP0 → ts2phc → `/dev/ptp0`, locked). Goal:
   prove the capture→reduce chain on a short run before committing to a long one.
