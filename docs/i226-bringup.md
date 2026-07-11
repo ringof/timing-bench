@@ -7,13 +7,14 @@ PPS-vs-PHC assessment and the "how good is our GM" number.
 
 This is Stage 3 of `docs/00-plan.md` (§3 and the Stage-3 checklist).
 
-> **Status: PPS→PHC + system clock validated (2026-07-11).** The i226 card is
-> installed; the **full PPS-injection path works** (F9T 1 PPS → SDP0 → `ts2phc`
-> locks `/dev/ptp0`, ~±10 ns, steps 1–5), and the **system clock is disciplined
-> from the F9T** via gpsd+chrony (~±1.5 ms, GPS preferred / NTP fallback, step
-> 6). What is **still unvalidated** is the `ptp4l` grandmaster (step 7),
-> including the `clockClass`/`clockAccuracy` values — treat those as
-> forward-looking guesses until a real reading confirms them.
+> **Status: full grandmaster chain up (2026-07-11).** F9T 1 PPS → SDP0 →
+> `ts2phc` locks `/dev/ptp0` (~±10 ns, steps 1–5); system clock disciplined from
+> the F9T via gpsd+chrony (~±1.5 ms, GPS preferred / NTP fallback, step 6);
+> `ptp4l` serves the PHC as a GPS-locked grandmaster on TAI, advertising
+> `clockClass 6` / `currentUtcOffset 37` (valid) / GPS (step 7, verified via
+> `pmc`). **Not yet done:** a PTP **client** (enp3s0 has no link/peer yet — the
+> Pi5), flag persistence across ptp4l restart, and confirming the PHC lands on
+> TAI deterministically after a reboot.
 
 Skeleton config files live in `config/i226/` (`ts2phc.conf`, `ptp4l.conf`,
 `chrony.conf`), each carrying the same `<CONFIRM>` placeholders as the blocks
@@ -133,9 +134,9 @@ drop to `v6.6`.
 ## Bring-up steps (card + breakout in hand)
 
 Each step gated on an observed reading before moving on (per CLAUDE.md). Steps
-1–6 are done (i226/PHC verified, pulse wired, F9T in timing mode, SDP0
-identified, PHC locked to the PPS via ts2phc, system clock disciplined via
-gpsd+chrony); step 7 (ptp4l grandmaster) remains.
+1–6 done, and the step-7 `ptp4l` grandmaster is up and verified (serving the TAI
+PHC as a GPS-locked GM); what remains under step 7 is a PTP **client** (a link/
+peer on enp3s0 — the Pi5) plus flag-persistence and reboot-TAI determinism.
 
 ### 1. Verify the i226 and its PHC — DONE (2026-07-08)
 
@@ -312,7 +313,7 @@ Gotchas / notes (each cost time):
 **Result:** `#* GPS` preferred at **~±1.5 ms**, NTP pools as `^-` fallback,
 persistent across reboots.
 
-### 7. Run the PTP grandmaster (ptp4l) — TODO
+### 7. Run the PTP grandmaster (ptp4l) — GM side DONE (2026-07-11); client/link pending
 
 **How absolute time is assembled (why steps 5 *and* 6 both exist).** PTP hands
 out *absolute* time, which is two independent pieces glued together:
@@ -330,37 +331,63 @@ the second*; the PPS provides the precision inside it. So step 6 is the
 the PHC** — its second named by the system clock, its sub-second pinned to ns by
 the PPS.
 
-**Correctness caveat — verify the PHC is on the RIGHT second.** The ~−36.5 s
-step at ts2phc startup is the flag: PTP runs in **TAI**, the system clock is
-**UTC**, and there are fixed integer offsets (TAI−UTC = 37 s, GPS−UTC = 18 s).
-If the PHC is off by one of those constants the *tick* is perfect but the
-*label* is wrong. Before trusting the grandmaster:
-- [ ] compare the PHC's absolute second to the F9T's reported GPS time (UBX /
-      gpsd) and confirm/step it to the correct second;
-- [ ] set PTP's `currentUtcOffset` (leap seconds) so clients resolve UTC↔TAI.
+**Correctness check — is the PHC on the RIGHT second? — DONE.** PTP runs in
+**TAI**, the system clock is **UTC** (TAI−UTC = 37 s). Verified with
+`phc_ctl /dev/ptp0 get` vs `date -u`: the PHC reads **+37 s ahead of UTC**, i.e.
+it is on **TAI** — the correct PTP timescale, **no step needed**. (Heads-up: the
+`phc_ctl … cmp` sign reads the *opposite* way; trust the direct `get` epoch
+comparison.) So the only action is to declare **`currentUtcOffset 37`** (done,
+below) so clients resolve TAI→UTC. Caveat: the PHC is on TAI *this session* —
+confirm it lands on TAI deterministically after a reboot (a to-do, not verified).
 
-This is bookkeeping, not a redo of step 6.
-
-With the PHC locked to GPS (and its absolute second verified), serve PTP.
-Skeleton: `config/i226/ptp4l.conf` (heads-up: its inline `#` comments need the
-same bare-value fix we made to `ts2phc.conf` before ptp4l will parse it):
+With the PHC on TAI, serve PTP. Validated config `config/i226/ptp4l.conf` (bare
+values — inline `#` comments break the parser, same as ts2phc):
 
 ```ini
 [global]
-clockClass 6             # <CONFIRM> GPS-locked GM (only once truly locked)
-clockAccuracy 0x20       # <CONFIRM> within 100 ns
+clockClass 6
+clockAccuracy 0x21
+utc_offset 37
+timeSource 0x20
 priority1 128
-tx_timestamp_timeout 10
-[enp3s0]                 # <CONFIRM> real interface
+tx_timestamp_timeout 50
+[enp3s0]
 ```
 
 ```bash
-ptp4l -f config/i226/ptp4l.conf -i <iface> --step_threshold=1 -m
+sudo ptp4l -f config/i226/ptp4l.conf -i enp3s0 -m
 ```
 
-`clockClass 6` advertises a GPS-traceable grandmaster in BMCA. AES67 / SMPTE
-2110 media profiles differ (domain / priorities / dscp) — that's a separate
-decision, not baked in here.
+**Then assert the traceability flags** — ptp4l.conf can't set these; they default
+to 0, which makes a client distrust the UTC offset and land on TAI (37 s off). A
+runtime management SET (does **not** survive a ptp4l restart — re-run after each
+start; for a service, `ExecStartPost`):
+
+```bash
+sudo pmc -u -b 0 'SET GRANDMASTER_SETTINGS_NP clockClass 6 clockAccuracy 0x21 \
+  offsetScaledLogVariance 0xffff currentUtcOffset 37 leap61 0 leap59 0 \
+  currentUtcOffsetValid 1 ptpTimescale 1 timeTraceable 1 frequencyTraceable 1 \
+  timeSource 0x20'
+sudo pmc -u -b 0 'GET TIME_PROPERTIES_DATA_SET'   # verify the flags read 1
+```
+
+**Result (2026-07-11):** ptp4l selected `/dev/ptp0`, assumed the grand master
+role (identity `f0b2b9.fffe.3551a9`), and advertises `clockClass 6`,
+`currentUtcOffset 37` + `Valid 1`, `timeTraceable 1`, `frequencyTraceable 1`,
+`timeSource GPS (0x20)`, `ptpTimescale 1`. Confirmed via `pmc`.
+
+**Still open:**
+- **No client yet.** `enp3s0` is `link down` (`port 1 … FAULTY`) with nothing
+  plugged in; the GM assumes the role but can't announce on the wire until a
+  client/switch is cabled (then `FAULTY → MASTER`). **Pi5 client is next:** check
+  `ethtool -T eth0` on the Pi5 (HW timestamping? the RP1 NIC may be SW-only),
+  cable it to `enp3s0`, run linuxptp slave + phc2sys/chrony.
+- **Flag persistence** — the `pmc SET` is runtime; make it survive restart
+  (wrapper / systemd `ExecStartPost`).
+- **Reboot determinism** — confirm the PHC lands on TAI after a reboot.
+
+A media profile (AES67 / SMPTE 2110) would change domain/priorities/dscp — a
+separate decision, not baked in here.
 
 ### 8. Reduce & plot
 

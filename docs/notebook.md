@@ -16,6 +16,38 @@ negative results are results.
 
 ---
 
+### 2026-07-11 (cont.) — Step 7: ptp4l grandmaster up (GM side); PHC verified on TAI
+- **Goal:** serve the ts2phc-disciplined PHC as a GPS-locked PTP grandmaster.
+  ptp4l reads/serves the PHC; ts2phc disciplines it — no conflict (no upstream
+  master, so ptp4l's servo is idle).
+- **Correctness check (the important bit) — PHC is on TAI.** `phc_ctl /dev/ptp0
+  get` vs `date -u`: PHC epoch − UTC epoch = **+37 s** → PHC is on **TAI**, the
+  correct PTP timescale, no step needed. (The `phc_ctl cmp` sign reads opposite;
+  trust the direct `get` comparison.) So we just declare `currentUtcOffset 37`.
+- **Config (validated):** `config/i226/ptp4l.conf` → `clockClass 6`,
+  `clockAccuracy 0x21`, `utc_offset 37`, `timeSource 0x20`, `[enp3s0]`; bare
+  values (inline `#` comments break the parser, same as ts2phc). Run:
+  `sudo ptp4l -f config/i226/ptp4l.conf -i enp3s0 -m`.
+- **Result:** ptp4l selected `/dev/ptp0`, **assumed the grand master role**
+  (identity `f0b2b9.fffe.3551a9`), advertising `clockClass 6` /
+  `currentUtcOffset 37` / GPS / `ptpTimescale 1`. Port 1 `link down → FAULTY`
+  (nothing plugged in) — expected; recovers to MASTER when a client is cabled.
+- **Gotcha — traceability flags default to 0.** `currentUtcOffsetValid`,
+  `timeTraceable`, `frequencyTraceable` came up **0**; ptp4l.conf can't set them.
+  `currentUtcOffsetValid 0` would make a client distrust the offset and land on
+  TAI (37 s off). Fixed with `pmc -u -b 0 'SET GRANDMASTER_SETTINGS_NP … Valid 1
+  timeTraceable 1 frequencyTraceable 1 …'` → re-read confirms all 1. **Runtime
+  only — does NOT survive a ptp4l restart** (persistence = wrapper / systemd
+  ExecStartPost; a to-do).
+- **Still open:** no PTP client yet (Pi5 — check `ethtool -T eth0`, RP1 may be
+  SW-timestamp only; cable to enp3s0; linuxptp slave + phc2sys/chrony); flag
+  persistence; confirm PHC lands on TAI deterministically after reboot.
+- **Boundary:** absolute accuracy vs an independent reference still unmeasured;
+  `clockAccuracy 0x21` (~100 ns) is an honest advertisement, not a measured
+  number.
+
+---
+
 ### 2026-07-11 (cont.) — Step 6: system clock disciplined from the F9T (gpsd + chrony)
 - **Goal:** OS clock GPS-traceable but coarse, separate from the precise PHC
   path, and silently falling back to NTP off-bench. Chose **Option A** (gpsd SHM
