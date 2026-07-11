@@ -312,9 +312,38 @@ Gotchas / notes (each cost time):
 **Result:** `#* GPS` preferred at **~±1.5 ms**, NTP pools as `^-` fallback,
 persistent across reboots.
 
-### 7. Run the PTP grandmaster (ptp4l)
+### 7. Run the PTP grandmaster (ptp4l) — TODO
 
-With the PHC locked to GPS, serve PTP. Skeleton: `config/i226/ptp4l.conf`:
+**How absolute time is assembled (why steps 5 *and* 6 both exist).** PTP hands
+out *absolute* time, which is two independent pieces glued together:
+- **Which second it is** — needs only coarse accuracy (better than ±0.5 s). The
+  GPS-disciplined **system clock (step 6, ~ms)** supplies this; a few ms of
+  error doesn't change which second you're in.
+- **Where in that second the tick falls** — needs ns. The **PPS via the PHC
+  (step 5)** supplies this.
+
+Glued together: system clock says `12:00:00.007` → the second is `12:00:00`;
+PPS edge at `…00.000000002` → 2 ns into it; result `12:00:00.000000002`,
+ns-absolute. The ms reference does **not** cap accuracy at ms — it only *names
+the second*; the PPS provides the precision inside it. So step 6 is the
+"name the second" half (not redundant), and **ptp4l's absolute-time source is
+the PHC** — its second named by the system clock, its sub-second pinned to ns by
+the PPS.
+
+**Correctness caveat — verify the PHC is on the RIGHT second.** The ~−36.5 s
+step at ts2phc startup is the flag: PTP runs in **TAI**, the system clock is
+**UTC**, and there are fixed integer offsets (TAI−UTC = 37 s, GPS−UTC = 18 s).
+If the PHC is off by one of those constants the *tick* is perfect but the
+*label* is wrong. Before trusting the grandmaster:
+- [ ] compare the PHC's absolute second to the F9T's reported GPS time (UBX /
+      gpsd) and confirm/step it to the correct second;
+- [ ] set PTP's `currentUtcOffset` (leap seconds) so clients resolve UTC↔TAI.
+
+This is bookkeeping, not a redo of step 6.
+
+With the PHC locked to GPS (and its absolute second verified), serve PTP.
+Skeleton: `config/i226/ptp4l.conf` (heads-up: its inline `#` comments need the
+same bare-value fix we made to `ts2phc.conf` before ptp4l will parse it):
 
 ```ini
 [global]
