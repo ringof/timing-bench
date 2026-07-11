@@ -16,6 +16,40 @@ negative results are results.
 
 ---
 
+### 2026-07-11 (cont.) — Step 6: system clock disciplined from the F9T (gpsd + chrony)
+- **Goal:** OS clock GPS-traceable but coarse, separate from the precise PHC
+  path, and silently falling back to NTP off-bench. Chose **Option A** (gpsd SHM
+  → chrony refclock, preferred), coarse (~ms).
+- **Config (validated):** `config/i226/chrony.conf` → drop-in
+  `/etc/chrony/conf.d/10-gps.conf`: `refclock SHM 0 refid GPS precision 1e-3
+  offset 0.063 poll 4 prefer`. `config/i226/gpsd.default` → `/etc/default/gpsd`
+  (by-id `DEVICES`, `GPSD_OPTIONS="-n"`, `USBAUTO="false"`); gpsd unmasked +
+  enabled at boot.
+- **Result:** `#* GPS` preferred, reach 377, offset **~±1.5 ms**; NTP pools `^-`
+  fallback; persistent across reboots.
+- **Gotchas (each cost time):**
+  1. **`-n` mandatory** — chrony reads gpsd's SHM (not a client), so without
+     `-n` a socket-activated gpsd never starts → empty SHM, chrony stuck on a
+     stale ghost sample.
+  2. **gpsd units were `masked`** (from the raw-ubxtool/ts2phc phase) —
+     `systemctl unmask` first; default `/etc/default/gpsd` also pointed at the
+     wrong device (`ttyUSB0`) with no `-n`.
+  3. **+63 ms in-band latency** — stable systematic; `offset 0.063` cancels it
+     (→ ±1.5 ms). Uncalibrated + `prefer` drags the clock 63 ms off and evicts
+     NTP as falsetickers. chrony subtracts offset from the raw sample, so cancel
+     a +63 ms lead with positive 0.063 (wrong sign ~doubles it — confirmed).
+  4. **Fallback is holdover-then-NTP, NOT instant** (I mis-stated "10–20 min").
+     With `prefer`, a stale sample's dispersion grows only ~1 ppm, so it clings
+     ~hours before handing to NTP mid-session; a **reboot with gpsd down uses
+     NTP immediately.** Clock stays sane (holdover) throughout.
+- **Trade:** gpsd now owns `/dev/ttyACM0`; stop gpsd for raw ubxtool F9T reconfig.
+- **Boundary:** coarse in-band GPS ≈ internet NTP numerically — `prefer` buys
+  traceability/independence, not accuracy. Precise timing stays in the PHC.
+- **Next:** Step 7 — `ptp4l` grandmaster (+ the owed `config/i226/ptp4l.conf`
+  inline-comment fix).
+
+---
+
 ### 2026-07-11 — Stage 3 characterized: 10.25 h ts2phc long run (PHC vs F9T PPS)
 - **Setup:** i226 PHC (`/dev/ptp0`, enp3s0) disciplined from the F9T 1 PPS on
   SDP0 via `ts2phc` (`config/i226/ts2phc.conf`). 10.25 h unattended capture.

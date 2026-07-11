@@ -1,0 +1,21 @@
+# /etc/default/gpsd — gpsd reads the F9T and feeds chrony via SHM (Step 6).
+#
+# HARDWARE-VALIDATED 2026-07-11 on host `radio`. Install:
+#   sudo cp config/i226/gpsd.default /etc/default/gpsd
+#   sudo systemctl unmask gpsd.socket gpsd.service    # they were masked earlier
+#   sudo systemctl enable --now gpsd.socket gpsd.service
+#
+# -n is ESSENTIAL: it makes gpsd poll the receiver without waiting for a client,
+# so it feeds the NTP SHM segment for chrony even with nothing on the gpsd socket
+# (chrony reads shared memory, which is NOT a gpsd client connection). Without
+# -n, a socket-activated gpsd never starts and SHM stays empty.
+#
+# Stable by-id path survives ttyACM renumbering. USBAUTO=false for deterministic
+# ownership (no udev auto-grab race).
+#
+# TRADE: gpsd now owns /dev/ttyACM0. For raw ubxtool reconfig of the F9T, stop
+# gpsd first (sudo systemctl stop gpsd), then restart it after.
+
+DEVICES="/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00"
+GPSD_OPTIONS="-n"
+USBAUTO="false"

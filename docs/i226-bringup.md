@@ -7,12 +7,12 @@ PPS-vs-PHC assessment and the "how good is our GM" number.
 
 This is Stage 3 of `docs/00-plan.md` (§3 and the Stage-3 checklist).
 
-> **Status: PPS→PHC validated (2026-07-10).** The i226 card is installed and the
-> **full PPS-injection path works on the bench**: the F9T 1 PPS lands on SDP0,
-> and `ts2phc` locks `/dev/ptp0` (enp3s0) to it — servo `s2`, steady-state
-> offset ~±10 ns, freq ~+10 ppm (steps 1–5 below). What is **still unvalidated**
-> is the *serving* side — chrony (system clock) and the `ptp4l` grandmaster
-> (steps 6–7), including the `clockClass`/`clockAccuracy` values. Treat those as
+> **Status: PPS→PHC + system clock validated (2026-07-11).** The i226 card is
+> installed; the **full PPS-injection path works** (F9T 1 PPS → SDP0 → `ts2phc`
+> locks `/dev/ptp0`, ~±10 ns, steps 1–5), and the **system clock is disciplined
+> from the F9T** via gpsd+chrony (~±1.5 ms, GPS preferred / NTP fallback, step
+> 6). What is **still unvalidated** is the `ptp4l` grandmaster (step 7),
+> including the `clockClass`/`clockAccuracy` values — treat those as
 > forward-looking guesses until a real reading confirms them.
 
 Skeleton config files live in `config/i226/` (`ts2phc.conf`, `ptp4l.conf`,
@@ -133,9 +133,9 @@ drop to `v6.6`.
 ## Bring-up steps (card + breakout in hand)
 
 Each step gated on an observed reading before moving on (per CLAUDE.md). Steps
-1–5 are done (i226/PHC verified, pulse wired, F9T in timing mode, SDP0
-identified, PHC locked to the PPS via ts2phc); steps 6 onward (chrony → ptp4l →
-reduce) remain.
+1–6 are done (i226/PHC verified, pulse wired, F9T in timing mode, SDP0
+identified, PHC locked to the PPS via ts2phc, system clock disciplined via
+gpsd+chrony); step 7 (ptp4l grandmaster) remains.
 
 ### 1. Verify the i226 and its PHC — DONE (2026-07-08)
 
@@ -262,19 +262,55 @@ ADEV, ideally vs. an independent clock) is the next capture, not this glimpse.
 Lower quality (routes through the CPU clock). Use only if EXTTS can't be made to
 work. Not needed — Path A works.
 
-### 6. Discipline the system clock (chrony, independent path)
+### 6. Discipline the system clock (chrony via gpsd) — DONE (2026-07-11)
 
-chrony keeps the OS clock sane from the F9T NMEA + PPS, independently of the
-PHC. Add these refclock lines to the host's `/etc/chrony/chrony.conf`
-(skeleton: `config/i226/chrony.conf`):
+Option A: gpsd reads the F9T → in-band GPS time to SHM unit 0 → chrony refclock,
+`prefer`red over the NTP pools. Keeps the OS clock GPS-traceable but **coarse
+(~ms)** — the precise timing lives in the PHC (step 5), deliberately separate.
+`prefer` buys traceability/independence, **not accuracy** (coarse in-band GPS ≈
+internet NTP numerically). Validated files: `config/i226/chrony.conf` (drop-in)
++ `config/i226/gpsd.default`.
+
+chrony drop-in → `/etc/chrony/conf.d/10-gps.conf` (main `chrony.conf` untouched):
 
 ```ini
-refclock SHM 0 refid NMEA offset 0.0 precision 1e-3 poll 4 noselect
-refclock PPS /dev/pps0 lock NMEA refid PPS prefer
+refclock SHM 0 refid GPS precision 1e-3 offset 0.063 poll 4 prefer
 ```
 
-`/dev/pps0` is a **placeholder** — depends on how PPS is routed (kernel
-`pps-gpio` or SDP-derived).
+gpsd → `/etc/default/gpsd`, then unmask + enable:
+
+```ini
+DEVICES="/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00"
+GPSD_OPTIONS="-n"
+USBAUTO="false"
+```
+```bash
+sudo systemctl unmask gpsd.socket gpsd.service
+sudo systemctl enable --now gpsd.socket gpsd.service   # enabled at boot; -n feeds SHM
+sudo systemctl restart chrony
+chronyc sources        # expect #* GPS, reach climbing, offset ~ms
+```
+
+Gotchas / notes (each cost time):
+- **`-n` is mandatory.** chrony reads gpsd's SHM, which is *not* a gpsd client,
+  so without `-n` a socket-activated gpsd never starts and SHM stays empty.
+- **gpsd units may be `masked`** (masked earlier to keep gpsd off the F9T during
+  raw-ubxtool / ts2phc work) — `systemctl unmask` first.
+- **Calibrate the in-band latency.** Raw, GPS reads **+63 ms** off (a stable
+  systematic); `offset 0.063` cancels it → ~±1.5 ms. Uncalibrated + `prefer`
+  drags the clock 63 ms off and evicts NTP as falsetickers. chrony *subtracts*
+  `offset` from the raw sample, so cancel a +63 ms lead with a **positive**
+  `0.063` (a wrong sign ~doubles it).
+- **Fallback is holdover-then-NTP, not instant.** With `prefer`, a stale GPS
+  sample is held a long time (its dispersion grows only ~1 ppm, so ~hours to
+  exceed the internet NTP's ~20 ms root distance) — the clock coasts on holdover
+  (stays sane), then hands to NTP. A **reboot with gpsd down uses NTP
+  immediately.** Delete the drop-in to disable GPS outright.
+- **gpsd owns `/dev/ttyACM0`.** Stop gpsd (`sudo systemctl stop gpsd`) before raw
+  `ubxtool` reconfig of the F9T.
+
+**Result:** `#* GPS` preferred at **~±1.5 ms**, NTP pools as `^-` fallback,
+persistent across reboots.
 
 ### 7. Run the PTP grandmaster (ptp4l)
 
