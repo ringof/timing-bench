@@ -1,0 +1,27 @@
+# ts2phc.service — discipline the i226 PHC from the F9T PPS (Step 7 persistence).
+#
+# Install (config goes to the linuxptp dir the units expect):
+#   sudo install -m0644 config/i226/ts2phc.conf    /etc/linuxptp/ts2phc.conf
+#   sudo install -m0644 config/i226/ts2phc.service /etc/systemd/system/ts2phc.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ts2phc.service
+#
+# No -m: ts2phc logs to the journal (journalctl -u ts2phc). It uses the i226
+# EXTTS (/dev/ptp0), not the F9T serial, so it does not conflict with gpsd. If
+# the F9T has no fix yet at boot it simply waits for edges (not fatal) and locks
+# once the pulse arrives; Restart=on-failure covers a real exit.
+
+[Unit]
+Description=ts2phc — discipline the i226 PHC from the F9T PPS (SDP0 EXTTS)
+Documentation=man:ts2phc
+# The PHC lives on the NIC; wait for the interface (hence /dev/ptp0) to exist.
+After=sys-subsystem-net-devices-enp3s0.device
+Wants=sys-subsystem-net-devices-enp3s0.device
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/ts2phc -f /etc/linuxptp/ts2phc.conf -s generic -c enp3s0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
