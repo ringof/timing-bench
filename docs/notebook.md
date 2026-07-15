@@ -16,6 +16,28 @@ negative results are results.
 
 ---
 
+### 2026-07-14 — Step 7 persistence: whole chain systemd, survives a cold reboot
+- **Goal:** make the grandmaster chain survive reboot (gpsd + chrony already
+  were). Added: `config/i226/ts2phc.service` (custom), a drop-in on the shipped
+  `ptp4l@.service` template (`config/i226/ptp4l@enp3s0.override.conf`:
+  `After=ts2phc` + `ExecStartPost`), and `config/i226/ptp4l-gm-settings.sh`
+  (re-asserts the GM flags each start). Configs → `/etc/linuxptp/`.
+- **linuxptp ships templates** (`ptp4l@.service`, `phc2sys@.service`) and no
+  ts2phc unit — so reuse `ptp4l@enp3s0` + drop-in, write ts2phc from scratch.
+- **Reboot test (the real proof) — all green:**
+  - `gpsd chrony ts2phc.service ptp4l@enp3s0.service` all `active` after boot.
+  - **PHC on TAI:** `phc_ctl get` − `date -u` = **+37 s** after a *cold* boot —
+    deterministic (igc initializes the PHC on TAI), so **no TAI-set step needed**
+    (the open question, answered favorably).
+  - **GM flags `1`** post-boot (`currentUtcOffsetValid`/`timeTraceable`/
+    `frequencyTraceable`) — the `ExecStartPost` helper fires at boot.
+  - chrony re-locked `#* GPS` (+790 µs).
+- **Result:** GPS→PPS→PHC(TAI)→ts2phc→ptp4l GM, plus gpsd→chrony system clock,
+  all come up correct on their own after a power cycle. Persistence done.
+- **Still open:** the PTP **client** — enp3s0 has no link/peer yet (the Pi5).
+
+---
+
 ### 2026-07-11 (cont.) — Step 7: ptp4l grandmaster up (GM side); PHC verified on TAI
 - **Goal:** serve the ts2phc-disciplined PHC as a GPS-locked PTP grandmaster.
   ptp4l reads/serves the PHC; ts2phc disciplines it — no conflict (no upstream

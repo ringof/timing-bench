@@ -12,9 +12,9 @@ This is Stage 3 of `docs/00-plan.md` (§3 and the Stage-3 checklist).
 > the F9T via gpsd+chrony (~±1.5 ms, GPS preferred / NTP fallback, step 6);
 > `ptp4l` serves the PHC as a GPS-locked grandmaster on TAI, advertising
 > `clockClass 6` / `currentUtcOffset 37` (valid) / GPS (step 7, verified via
-> `pmc`). **Not yet done:** a PTP **client** (enp3s0 has no link/peer yet — the
-> Pi5), flag persistence across ptp4l restart, and confirming the PHC lands on
-> TAI deterministically after a reboot.
+> `pmc`). The whole chain is **systemd-persistent — validated across a cold
+> reboot** (all services auto-start, flags re-assert, PHC comes up on TAI).
+> **Not yet done:** a PTP **client** — enp3s0 has no link/peer yet (the Pi5).
 
 Skeleton config files live in `config/i226/` (`ts2phc.conf`, `ptp4l.conf`,
 `chrony.conf`), each carrying the same `<CONFIRM>` placeholders as the blocks
@@ -376,15 +376,24 @@ role (identity `f0b2b9.fffe.3551a9`), and advertises `clockClass 6`,
 `currentUtcOffset 37` + `Valid 1`, `timeTraceable 1`, `frequencyTraceable 1`,
 `timeSource GPS (0x20)`, `ptpTimescale 1`. Confirmed via `pmc`.
 
-**Still open:**
-- **No client yet.** `enp3s0` is `link down` (`port 1 … FAULTY`) with nothing
-  plugged in; the GM assumes the role but can't announce on the wire until a
-  client/switch is cabled (then `FAULTY → MASTER`). **Pi5 client is next:** check
-  `ethtool -T eth0` on the Pi5 (HW timestamping? the RP1 NIC may be SW-only),
-  cable it to `enp3s0`, run linuxptp slave + phc2sys/chrony.
-- **Flag persistence** — the `pmc SET` is runtime; make it survive restart
-  (wrapper / systemd `ExecStartPost`).
-- **Reboot determinism** — confirm the PHC lands on TAI after a reboot.
+**Persistence (systemd) — DONE (2026-07-14), validated across a cold reboot.**
+gpsd + chrony were already persistent; the grandmaster chain now is too:
+- `config/i226/ts2phc.service` — custom unit; disciplines the PHC at boot.
+- `config/i226/ptp4l@enp3s0.override.conf` — drop-in on the shipped
+  `ptp4l@.service`: `After=ts2phc.service` + `ExecStartPost` the flags helper.
+- `config/i226/ptp4l-gm-settings.sh` — re-asserts the GM traceability flags on
+  every start (they reset to 0 otherwise → client would land on TAI).
+
+Install steps are in each file's header (configs → `/etc/linuxptp/`; `enable
+--now`). **Reboot result:** gpsd/chrony/ts2phc/ptp4l all auto-started, the flags
+came up `1`, and — answering the open question — **the PHC came up on TAI (+37 s)
+deterministically** (igc initializes it there), so no TAI-set step is needed.
+
+**Still open — the client.** `enp3s0` is `link down` (`port 1 … FAULTY`) with
+nothing plugged in; the GM holds the role but can't announce until a client/
+switch is cabled (then `FAULTY → MASTER`). **Pi5 is next:** check `ethtool -T
+eth0` on the Pi5 (HW timestamping? the RP1 NIC may be SW-only), cable it to
+`enp3s0`, run linuxptp slave + phc2sys/chrony.
 
 A media profile (AES67 / SMPTE 2110) would change domain/priorities/dscp — a
 separate decision, not baked in here.
