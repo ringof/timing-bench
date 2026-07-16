@@ -16,6 +16,33 @@ negative results are results.
 
 ---
 
+### 2026-07-16 — Stage 2: 24 h sawtooth (qErr) — stable across the full day
+- **Setup:** F9T timing mode (GPS grid; RAM config held through the host
+  reboots), UBX-TIM-TP via `collect/log_ubx_timing.sh`. gpsd masked for the run;
+  ts2phc + the grandmaster kept running on the EXTTS path throughout.
+- **Capture:** `data/run_20260715-044101/` — 24 hourly segments, **86,787
+  timepulses, zero dropped** (every seg `tim_tp=3600`; one seg lost 9 NAV-PVT
+  lines only — no qErr loss). Reduced → `data/sample_24h_timtp.tsv` (+ `.adev.tsv`).
+- **Observed:**
+  - qErr: mean **−0.13 ns**, **RMS 2.25 ns**, range −4.05…+3.81 ns — bounded
+    ±4 ns sawtooth.
+  - **Identical to the 6 h run (RMS 2.25 ns then too)** → quantization is stable
+    across a full day: **no day/night satellite-geometry effect** on the F9T
+    timepulse quantization (it's internal-clock quantization, not geometry). That
+    is what the ≥24 h run set out to answer.
+  - ADEV: clean **τ⁻¹ over 16 octaves**, 3.86e-9 @1 s → 1.19e-13 @32768 s. Cross-
+    check √3·RMS = √3·2.252 = 3.90 ns ≈ ADEV(1 s) 3.86 ns (<1%) → white phase.
+- **Boundary:** receiver's self-reported *quantization*, not true stability (that
+  is the PHC-vs-PPS number, Stage 3). Survey is still the loose dry-run.
+- **Ops:** gpsd unmasked + restarted after; chrony re-locked `#* GPS`.
+- **Artifacts:** `collect/log_ubx_timing.sh`; `reduce/parse_pps.py` + `allan.py`;
+  `plots/pps_offset.gp` + `adev.gp`; `data/sample_24h_timtp.tsv` + `.adev.tsv`;
+  `out/pps_offset.png`, `out/adev.png`.
+- **Next:** real antenna siting → tight/long survey → real captures; the Pi5
+  client + served-side measurement.
+
+---
+
 ### 2026-07-14 — Step 7 persistence: whole chain systemd, survives a cold reboot
 - **Goal:** make the grandmaster chain survive reboot (gpsd + chrony already
   were). Added: `config/i226/ts2phc.service` (custom), a drop-in on the shipped

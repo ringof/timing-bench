@@ -50,10 +50,11 @@ the main remaining work.
 - [x] First notebook baseline capture (6 h overnight).
 
 ### Stage 2 — sawtooth characterization
-- [ ] Quantization error over **≥ 24 h** (day/night sat geometry) — only ~6 h so
-      far; **the 24 h run is next.**
-- [x] `reduce/allan.py` ADEV (qErr τ⁻¹ confirmed) — corrected-vs-uncorrected
-      comparison not yet done.
+- [x] Quantization error over **≥ 24 h** — 24.1 h / 86,787 timepulses, zero
+      dropped (`data/sample_24h_timtp.*`). qErr RMS 2.25 ns, **no day/night
+      geometry effect** (identical to the 6 h run).
+- [x] `reduce/allan.py` ADEV — clean τ⁻¹ over 16 octaves; √3·RMS cross-check
+      spot-on. Corrected-vs-uncorrected comparison still not done.
 - [x] `plots/adev.gp` log-log ADEV.
 
 ### Stage 3 — end-to-end PHC assessment
@@ -67,7 +68,7 @@ the main remaining work.
 
 ### Remaining to close the plan
 - [ ] **Real** antenna siting → tight/long survey-in → real Stage-1/2/3 captures.
-- [ ] 24 h sawtooth run (Stage 2).
+- [x] 24 h sawtooth run (Stage 2) — 2026-07-16, `data/sample_24h_timtp.*`.
 - [ ] PTP client (Pi5) + served-side measurement (Stage 3).
 - [ ] Optional: corrected-vs-uncorrected ADEV; `plots/skyplot_sats.gp`.
 
