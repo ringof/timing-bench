@@ -42,17 +42,13 @@ def read_series(path, col_name):
 
 def overlapping_adev(phase, rate):
     """phase: list of phase values in seconds, sampled at `rate` Hz."""
-    # drop NaNs by simple forward-fill so tau math stays uniform; note in docs.
-    clean = []
-    last = None
-    for v in phase:
-        if math.isnan(v):
-            if last is not None:
-                clean.append(last)
-        else:
-            clean.append(v)
-            last = v
-    x = clean
+    # Drop NaN entries rather than forward-filling. NaN appears when the chosen
+    # column is sparse — e.g. a TIM-TP+NAV-PVT capture interleaves qErr rows with
+    # NAV-PVT rows that carry no qErr. Forward-filling would duplicate each real
+    # qErr across those rows and badly distort the ADEV. Dropping assumes the
+    # surviving samples are ~uniformly spaced at `rate` (true for our 1 Hz qErr,
+    # which had zero dropped timepulses); it is NOT gap-aware for real dropouts.
+    x = [v for v in phase if not math.isnan(v)]
     N = len(x)
     if N < 3:
         return []

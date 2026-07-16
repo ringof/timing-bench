@@ -1,7 +1,7 @@
 # timing-bench
 
 A living bench for characterizing timing sources and, eventually, the full
-GPS → PHC → PTP chain. First occupant: a SparkFun u-blox **NEO-F9T** timing
+GPS → PHC → PTP chain. First occupant: a SparkFun u-blox **ZED-F9T-20B** timing
 receiver on USB. Later occupants: an Intel **i226** PHC disciplined by the F9T
 PPS (via `ts2phc`), served as a PTP grandmaster (`ptp4l`).
 

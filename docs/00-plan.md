@@ -33,30 +33,48 @@ gated on the i226/ts2phc bring-up (see the separate PTP grandmaster work).
 
 ## Roadmap
 
-### Stage 1 — F9T health logging (NOW)
-- [ ] Confirm F9T in stationary/timing mode with a completed survey-in
-      (see `f9t-setup.md`).
-- [ ] `collect/` logs UBX-TIM-TP + UBX-NAV-STATUS/-SAT at 1 Hz to `data/`.
-- [ ] `reduce/parse_pps.py` emits tidy TSV: epoch, tp_offset_ns, quant_err_ns,
-      fix_type, num_sv, survey_valid.
-- [ ] `plots/pps_offset.gp`, `plots/skyplot_sats.gp` render from that TSV.
-- [ ] First notebook entry with a baseline capture (≥ a few hours).
+Status as of 2026-07-16. The **grandmaster bring-up** (wiring → ts2phc → ptp4l →
+systemd persistence, reboot-validated) is done — see `docs/i226-bringup.md`. The
+**antenna is properly sited** and the 24 h sawtooth is real, at-spec F9T data
+(not a placeholder). What remains: the PTP **client** (Pi5) + served-side
+measurement, and — optionally — a *tighter* survey-in (the accuracy limit is
+still loose, giving a coarse ~22 m surveyed position that biases *absolute* time
+but not the qErr).
 
-### Stage 2 — sawtooth characterization (NOW)
-- [ ] Log quantization error over a long run (≥ 24 h to see day/night sat
-      geometry effects).
-- [ ] `reduce/allan.py` computes ADEV/MDEV of the corrected vs. uncorrected
-      series.
-- [ ] `plots/adev.gp` log-log ADEV. Compare corrected vs. uncorrected to
-      quantify the value of sawtooth correction.
+### Stage 1 — F9T health logging
+- [x] F9T in stationary/timing mode, **antenna properly sited**; survey-in run
+      with a loose accuracy limit (100 m → coarse ~22 m position). A *tighter*
+      survey would refine absolute position/time, not the qErr. See `f9t-setup.md`.
+- [x] `collect/` logs UBX-TIM-TP + NAV at 1 Hz to `data/`
+      (`collect/log_ubx_timing.sh`).
+- [x] `reduce/parse_pps.py` emits tidy TSV (TIM-TP path validated on real data).
+- [~] Plots — `plots/pps_offset.gp` done; `plots/skyplot_sats.gp` not yet
+      exercised.
+- [x] First notebook baseline capture (6 h overnight).
 
-### Stage 3 — end-to-end PHC assessment (LATER, gated on i226)
-- [ ] Wire F9T TIMEPULSE → i226 SDP (via timeSync breakout).
-- [ ] `testptp -e` to confirm EXTTS edges and identify the pin index.
-- [ ] Collector reads EXTTS timestamps; reduce to PHC-vs-PPS offset series.
-- [ ] Plot offset + ADEV; this becomes the headline "how good is our GM" plot.
-- [ ] Extend collectors to scrape `ptp4l -m` master offset / RMS for the
-      served side.
+### Stage 2 — sawtooth characterization
+- [x] Quantization error over **≥ 24 h** — 24.1 h / 86,787 timepulses, zero
+      dropped (`data/sample_24h_timtp.*`). qErr RMS 2.25 ns, **no day/night
+      geometry effect** (identical to the 6 h run).
+- [x] `reduce/allan.py` ADEV — clean τ⁻¹ over 16 octaves; √3·RMS cross-check
+      spot-on. Corrected-vs-uncorrected comparison still not done.
+- [x] `plots/adev.gp` log-log ADEV.
+
+### Stage 3 — end-to-end PHC assessment
+- [x] Wire F9T TIMEPULSE → i226 SDP0 (Timebeat U.FL breakout).
+- [x] `testptp -e` — EXTTS confirmed, pin = SDP0.
+- [x] PHC-vs-PPS offset series (via ts2phc `-m`) reduced
+      (`reduce/parse_ts2phc.py`).
+- [x] Offset + ADEV plots (10.25 h run: ~4.7 ns RMS, τ⁻¹) — headline GM number.
+- [ ] Scrape `ptp4l -m` master offset / RMS for the **served** side — needs the
+      PTP client (Pi5).
+
+### Remaining to close the plan
+- [x] 24 h sawtooth run (Stage 2) — 2026-07-16, at-spec, `data/sample_24h_timtp.*`.
+- [ ] PTP client (Pi5) + served-side measurement (Stage 3).
+- [ ] (Optional) *tighter* survey-in for better absolute position/time — antenna
+      siting itself is done; the qErr is at-spec real data.
+- [ ] (Optional) corrected-vs-uncorrected ADEV; `plots/skyplot_sats.gp`.
 
 ## Conventions
 - Raw captures: append-only, line-oriented, **epoch seconds first column**.
