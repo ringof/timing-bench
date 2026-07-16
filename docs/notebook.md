@@ -32,8 +32,12 @@ negative results are results.
     is what the ≥24 h run set out to answer.
   - ADEV: clean **τ⁻¹ over 16 octaves**, 3.86e-9 @1 s → 1.19e-13 @32768 s. Cross-
     check √3·RMS = √3·2.252 = 3.90 ns ≈ ADEV(1 s) 3.86 ns (<1%) → white phase.
-- **Boundary:** receiver's self-reported *quantization*, not true stability (that
-  is the PHC-vs-PPS number, Stage 3). Survey is still the loose dry-run.
+- **Antenna sited / at spec:** this is the *real* antenna siting — the
+  ±4 ns / 2.25 ns-RMS sawtooth is the F9T at its timepulse-quantization spec,
+  not a placeholder. (The survey-in *accuracy limit* is still loose → coarse
+  ~22 m surveyed position, which biases *absolute* time, not the qErr.)
+- **Boundary:** still the receiver's self-reported *quantization*, not true
+  stability vs an independent clock (that is the Stage-3 PHC-vs-PPS number).
 - **Ops:** gpsd unmasked + restarted after; chrony re-locked `#* GPS`.
 - **Artifacts:** `collect/log_ubx_timing.sh`; `reduce/parse_pps.py` + `allan.py`;
   `plots/pps_offset.gp` + `adev.gp`; `data/sample_24h_timtp.tsv` + `.adev.tsv`;
