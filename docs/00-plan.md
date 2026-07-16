@@ -33,15 +33,18 @@ gated on the i226/ts2phc bring-up (see the separate PTP grandmaster work).
 
 ## Roadmap
 
-Status as of 2026-07-14. The **grandmaster bring-up** (wiring → ts2phc → ptp4l →
-systemd persistence, reboot-validated) is done — see `docs/i226-bringup.md`.
-Captures so far were **dry-runs** (loose survey, ~6 h) that proved the toolchain;
-the **real-data pass** (antenna siting → tight/long survey → real captures) is
-the main remaining work.
+Status as of 2026-07-16. The **grandmaster bring-up** (wiring → ts2phc → ptp4l →
+systemd persistence, reboot-validated) is done — see `docs/i226-bringup.md`. The
+**antenna is properly sited** and the 24 h sawtooth is real, at-spec F9T data
+(not a placeholder). What remains: the PTP **client** (Pi5) + served-side
+measurement, and — optionally — a *tighter* survey-in (the accuracy limit is
+still loose, giving a coarse ~22 m surveyed position that biases *absolute* time
+but not the qErr).
 
 ### Stage 1 — F9T health logging
-- [x] F9T in stationary/timing mode with a survey-in — **dry-run only** (loose
-      100 m / 120 s; real siting-quality survey still TODO). See `f9t-setup.md`.
+- [x] F9T in stationary/timing mode, **antenna properly sited**; survey-in run
+      with a loose accuracy limit (100 m → coarse ~22 m position). A *tighter*
+      survey would refine absolute position/time, not the qErr. See `f9t-setup.md`.
 - [x] `collect/` logs UBX-TIM-TP + NAV at 1 Hz to `data/`
       (`collect/log_ubx_timing.sh`).
 - [x] `reduce/parse_pps.py` emits tidy TSV (TIM-TP path validated on real data).
@@ -67,10 +70,11 @@ the main remaining work.
       PTP client (Pi5).
 
 ### Remaining to close the plan
-- [ ] **Real** antenna siting → tight/long survey-in → real Stage-1/2/3 captures.
-- [x] 24 h sawtooth run (Stage 2) — 2026-07-16, `data/sample_24h_timtp.*`.
+- [x] 24 h sawtooth run (Stage 2) — 2026-07-16, at-spec, `data/sample_24h_timtp.*`.
 - [ ] PTP client (Pi5) + served-side measurement (Stage 3).
-- [ ] Optional: corrected-vs-uncorrected ADEV; `plots/skyplot_sats.gp`.
+- [ ] (Optional) *tighter* survey-in for better absolute position/time — antenna
+      siting itself is done; the qErr is at-spec real data.
+- [ ] (Optional) corrected-vs-uncorrected ADEV; `plots/skyplot_sats.gp`.
 
 ## Conventions
 - Raw captures: append-only, line-oriented, **epoch seconds first column**.
